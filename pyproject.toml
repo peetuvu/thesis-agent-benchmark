@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "setuptools-scm"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "thesis-agents"
 version = "0.1.0"
 description = "Benchmarking harness for multi-agent LLM architectures on software development tasks"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Peetu Vuorela"},
 ]
@@ -30,6 +30,9 @@ bench = "runner.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["runner*", "architectures*"]
 
 [tool.ruff]
 target-version = "py311"
