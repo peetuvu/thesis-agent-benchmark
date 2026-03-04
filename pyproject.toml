@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thesis-agents"
+version = "0.1.0"
+description = "Benchmarking harness for multi-agent LLM architectures on software development tasks"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Peetu Vuorela"},
+]
+dependencies = [
+    "anthropic>=0.39.0",
+    "openai>=1.50.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+bench = "runner.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 99
