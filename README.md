@@ -1,0 +1,183 @@
+DEVELOPMENT STAGES — Thesis Benchmark Harness
+================================================
+
+MVP target: 1 task family (Snake2), 2 architectures (single-agent baseline
++ fixed 3-stage sequential pipeline), strict matched budgets, automated
+hidden eval, structured JSON logs. This alone is a defensible thesis
+contribution.
+
+---------------------------------------------------------------
+STAGE A — Repo structure + task packaging            [~90% DONE]
+---------------------------------------------------------------
+Difficulty: Easy (if frozen early)
+
+What exists:
+- agent-bench/, eval/, runner/, runs/ layout is stable
+- Snake2 task: spec, stub, public tests, hidden tests, eval script
+- Architecture base class with full data model
+- pass@k estimator with tests
+
+Remaining:
+- [ ] Verify snake README covers ALL features tested by hidden tests
+      (big food, obstacles, wrap mode, deterministic respawn algo)
+- [ ] Fill agent-bench/README.md with a brief description
+- [ ] Confirm prompts/ directory purpose — decide if prompt files
+      live per-task or globally
+
+Rule: Do NOT restructure directories after this stage.
+
+---------------------------------------------------------------
+STAGE B — Sandbox policy (detect + invalidate)       [NOT STARTED]
+---------------------------------------------------------------
+Difficulty: Medium
+
+Approach: "detect and invalidate" — not "prevent."
+Full containerization is out of scope for now.
+
+Build:
+- [ ] Pre-run: hash eval/ directory contents (SHA256 manifest)
+- [ ] Post-run: re-hash and compare — fail run if anything changed
+- [ ] Post-run: check that only allowed files were modified
+      (e.g., only game.py in the snake task)
+- [ ] Record policy compliance status in run log
+- [ ] Document the policy in CLAUDE.md and in the thesis methodology
+
+Future (optional): Docker-based sandboxing if needed for SWE-bench.
+
+---------------------------------------------------------------
+STAGE C — Runner / harness                           [NOT STARTED]
+---------------------------------------------------------------
+Difficulty: Medium → Hard (biggest time sink)
+
+Core design decisions (lock these in):
+- Each run copies the task to a fresh temp directory (shutil.copytree
+  + tempfile.mkdtemp). Never run in-place. This eliminates most
+  cross-run contamination.
+- Single entry point: `bench run --task snake --arch single_agent`
+- Explicit PYTHONPATH, explicit python executable, explicit cwd
+- Runner calls architecture.run(), then runs eval, then writes log
+
+Build order:
+- [ ] runner/config.py — RunConfig dataclass: model, provider, budget
+      limits (max_tokens, max_tool_calls, max_wall_clock), timeout,
+      prompt regime path, seed, task name, architecture name
+- [ ] runner/executor.py — Executor class:
+        1. Copy task dir to temp
+        2. Call architecture.run(task_context)
+        3. Run sandbox policy checks
+        4. Run hidden eval (subprocess: bash eval/run_eval.sh <task>)
+        5. Collect results → RunResult
+- [ ] runner/cli.py — argparse CLI wired to executor
+      (entry point: `bench` command from pyproject.toml)
+
+Key contamination sources to guard against:
+- leftover __pycache__ / .pytest_cache
+- agents adding files that change import behavior
+- venv vs system python mismatch
+- working directory differences
+
+---------------------------------------------------------------
+STAGE D — Logging + traceability                     [NOT STARTED]
+---------------------------------------------------------------
+Difficulty: Hard (most underestimated)
+
+Split into two sub-stages:
+
+D1: Schema + local JSON logging (do this first)
+- [ ] Define RunLog schema (pydantic model):
+        run_id (UUID), timestamp, git_commit, git_branch
+        task_name, architecture_name, prompt_regime
+        model, provider, model_version
+        budget_config (max_tokens, max_tool_calls, max_wall_clock)
+        actual_metrics (tokens_prompt, tokens_completion, tokens_total,
+                        api_calls, wall_clock_seconds, estimated_cost)
+        test_results (public_passed, public_total, hidden_passed,
+                      hidden_total, failing_test_names)
+        status (success/failure/error/timeout/budget_exceeded)
+        policy_compliant (bool)
+        stop_reason (string)
+        notes (optional string)
+- [ ] Write each run as a JSON file in runs/<run_id>.json
+- [ ] Also write a human-readable markdown summary
+- [ ] Fields can be null — better null consistently than missing
+
+D2: Provider-specific telemetry extraction (incremental)
+- [ ] Anthropic API: extract token usage from response metadata
+- [ ] OpenAI API: extract token usage from response metadata
+- [ ] Google API: extract token usage (if available)
+- [ ] Cost estimation: model → price-per-token lookup table
+- [ ] Don't let "can't get tokens from provider X" block logging
+      for provider Y
+
+---------------------------------------------------------------
+STAGE E — Experiment orchestration                   [NOT STARTED]
+---------------------------------------------------------------
+Difficulty: Hard
+
+Stage incrementally — do NOT jump to ensembles:
+
+E1: Single-agent baseline
+- [ ] architectures/single_agent.py — one LLM call, one shot
+- [ ] Validate full pipeline: run → eval → log
+- [ ] Run snake task, confirm hidden tests score correctly
+
+E2: Fixed-length sequential pipeline (no loops)
+- [ ] architectures/sequential.py — plan → implement → review → fix
+- [ ] Fixed 4 steps, no iteration
+- [ ] Same budget constraints as single-agent
+
+E3: Add iteration (review/fix loops)
+- [ ] Configurable max_iterations
+- [ ] Controller that can stop agents and record WHY
+- [ ] "Who gets to run tests when" rules must be consistent
+
+E4: Additional architectures (only if time permits)
+- [ ] Parallel ensemble with aggregation
+- [ ] Adversarial debate
+- [ ] Blackboard/shared memory
+
+Budget enforcement:
+- Each architecture gets the same max_tokens and max_tool_calls
+- A run terminates when: correct solution, budget exceeded, timeout,
+  or max iterations reached
+- Stop reason is always recorded
+
+Do NOT build E3/E4 until you have comparative results from E1 vs E2.
+A fixed pipeline without iteration may already tell an interesting story.
+
+---------------------------------------------------------------
+STAGE F — Task scaling                               [NOT STARTED]
+---------------------------------------------------------------
+Difficulty: Medium → Hard
+
+Order:
+- [ ] Second toy task with DIFFERENT failure modes (e.g., string
+      manipulation, simple data structure — NOT another game)
+      Two diverse toy tasks with solid methodology > 164 HumanEval
+      problems with a shaky runner.
+- [ ] HumanEval subset (start with 20-30 problems, not all 164)
+- [ ] MBPP subset (optional, if HumanEval goes smoothly)
+- [ ] SWE-bench subset (optional, hard, different paradigm)
+
+Each new task family will likely break something in the runner.
+Do NOT attempt this until Stage C is rock-solid.
+
+---------------------------------------------------------------
+PREDICTED SINGLE HARDEST PART
+---------------------------------------------------------------
+Reproducibility + validity under real-world mess.
+
+Not writing code — keeping the system stable while adding:
+  more tasks, more architectures, more models/providers, more runs.
+
+Engineering discipline, not cleverness.
+
+---------------------------------------------------------------
+CURRENT POSITION (as of 2026-03-04)
+---------------------------------------------------------------
+Stage A: ~90% done (verify snake README completeness)
+Stage B: Not started
+Stage C: Not started (this is the next priority)
+Stage D: Not started
+Stage E: Not started
+Stage F: Not started
