@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import traceback
 from pathlib import Path
@@ -15,8 +17,8 @@ from runner.config import RunConfig, TaskPaths
 from runner.logger import (
     ActualMetrics,
     BudgetConfig,
-    RunLog,
     EvalResults,
+    RunLog,
     get_git_info,
     save_run_log,
 )
@@ -48,7 +50,13 @@ def _parse_pytest_output(stdout: str, stderr: str) -> tuple[int, int, list[str]]
 
 
 class Executor:
-    """Runs an architecture on a task and produces a RunLog."""
+    """Runs an architecture on a task and produces a RunLog.
+
+    The real repository is never modified during a run.  The architecture
+    works inside a temporary copy of the task directory, and both public
+    and hidden evaluation run against that same temp copy.  The only
+    side-effect is the run log written to ``runs/``.
+    """
 
     def __init__(self, repo_root: Path | None = None) -> None:
         from runner.config import _find_repo_root
@@ -72,48 +80,40 @@ class Executor:
             raise RuntimeError(f"Failed to copy task dir: {e}") from e
 
         try:
+            # --- 3. Snapshot temp dir before architecture runs ---
+            task_pre = snapshot_directory(temp_task_dir)
+
+            # --- 4. Run architecture in temp dir ---
             result = await self._run_architecture(config, paths, temp_task_dir, architecture)
 
-            # --- 7. Workspace policy check (temp dir) ---
-            task_pre = snapshot_directory(temp_task_dir)  # copytree baseline
-            # Re-snapshot not needed — we check modified_files against allowed list
-            workspace_violations = []
-            if result.modified_files:
-                allowed = set(paths.allowed_edit_files)
-                for rel_path in result.modified_files:
-                    if rel_path not in allowed:
-                        workspace_violations.append(f"modified disallowed file: {rel_path}")
+            # --- 5. Write modified files into the temp dir ---
+            self._apply_modified_files(result.modified_files, temp_task_dir)
 
-            # --- 8–10. Write modified files, run eval, restore ---
-            original_contents = self._backup_source_files(paths)
-            self._write_modified_files(result.modified_files, paths)
+            # --- 6. Snapshot temp dir after architecture, check workspace policy ---
+            task_post = snapshot_directory(temp_task_dir)
+            task_ok, workspace_violations = check_policy(
+                task_pre, task_post, allowed_files=paths.allowed_edit_files,
+            )
 
-            hidden_passed = hidden_total = 0
-            public_passed = public_total = 0
-            hidden_failing: list[str] = []
-            public_failing: list[str] = []
+            # --- 7. Run hidden eval against temp dir ---
+            hidden_passed, hidden_total, hidden_failing = self._run_hidden_eval(
+                config.task_name, temp_task_dir,
+            )
 
-            try:
-                # Post-snapshot eval/
-                eval_post = snapshot_directory(paths.eval_dir)
-                eval_ok, eval_violations = check_policy(eval_pre, eval_post, allowed_files=[])
+            # --- 8. Run public tests against temp dir ---
+            public_passed, public_total, public_failing = self._run_public_tests(
+                temp_task_dir,
+            )
 
-                # Run hidden eval
-                hidden_passed, hidden_total, hidden_failing = self._run_hidden_eval(
-                    config.task_name
-                )
+            # --- 9. Post-snapshot eval/ (safety: nothing should have changed) ---
+            eval_post = snapshot_directory(paths.eval_dir)
+            eval_ok, eval_violations = check_policy(eval_pre, eval_post, allowed_files=[])
 
-                # Run public tests
-                public_passed, public_total, public_failing = self._run_public_tests(paths)
-
-            finally:
-                self._restore_source_files(original_contents, paths)
-
-            # --- Policy compliance ---
+            # --- 10. Policy compliance ---
             all_violations = eval_violations + workspace_violations
             policy_compliant = len(all_violations) == 0
 
-            # --- Assemble RunLog ---
+            # --- 11. Assemble RunLog ---
             git_commit, git_branch = get_git_info()
 
             status = result.status.value
@@ -163,6 +163,10 @@ class Executor:
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     async def _run_architecture(
         self,
@@ -238,34 +242,21 @@ class Executor:
             seed=config.seed,
         )
 
-    def _backup_source_files(self, paths: TaskPaths) -> dict[str, str]:
-        """Read and return the current contents of all editable source files."""
-        originals: dict[str, str] = {}
-        for rel in paths.allowed_edit_files:
-            full_path = paths.task_dir / rel
-            if full_path.exists():
-                originals[rel] = full_path.read_text()
-        return originals
-
-    def _write_modified_files(self, modified: dict[str, str], paths: TaskPaths) -> None:
-        """Write the architecture's modified files to the real task directory."""
+    def _apply_modified_files(self, modified: dict[str, str], temp_task_dir: Path) -> None:
+        """Write the architecture's modified files into the temp task directory."""
         for rel_path, content in modified.items():
-            target = paths.task_dir / rel_path
+            target = temp_task_dir / rel_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content)
 
-    def _restore_source_files(self, originals: dict[str, str], paths: TaskPaths) -> None:
-        """Restore original source file contents after eval."""
-        for rel_path, content in originals.items():
-            target = paths.task_dir / rel_path
-            target.write_text(content)
-
-    def _run_hidden_eval(self, task_name: str) -> tuple[int, int, list[str]]:
-        """Run hidden evaluation via eval/run_eval.sh and parse results."""
+    def _run_hidden_eval(
+        self, task_name: str, temp_task_dir: Path
+    ) -> tuple[int, int, list[str]]:
+        """Run hidden evaluation via eval/run_eval.sh against the temp dir."""
         eval_script = self.repo_root / "eval" / "run_eval.sh"
         try:
             proc = subprocess.run(
-                ["bash", str(eval_script), task_name],
+                ["bash", str(eval_script), task_name, str(temp_task_dir)],
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -278,25 +269,23 @@ class Executor:
 
         return _parse_pytest_output(proc.stdout, proc.stderr)
 
-    def _run_public_tests(self, paths: TaskPaths) -> tuple[int, int, list[str]]:
-        """Run public sanity tests and parse results."""
-        if not paths.public_tests_dir.exists():
+    def _run_public_tests(self, temp_task_dir: Path) -> tuple[int, int, list[str]]:
+        """Run public sanity tests against the temp dir."""
+        tests_dir = temp_task_dir / "tests"
+        if not tests_dir.exists():
             return 0, 0, []
 
         try:
             proc = subprocess.run(
                 [
-                    "python", "-m", "pytest", "-v", "--tb=line", "-q",
-                    str(paths.public_tests_dir),
+                    sys.executable, "-m", "pytest", "-v", "--tb=line", "-q",
+                    str(tests_dir),
                 ],
                 capture_output=True,
                 text=True,
                 timeout=60,
-                cwd=paths.task_dir,
-                env={
-                    **__import__("os").environ,
-                    "PYTHONPATH": str(paths.task_dir),
-                },
+                cwd=temp_task_dir,
+                env={**os.environ, "PYTHONPATH": str(temp_task_dir)},
             )
         except subprocess.TimeoutExpired:
             return 0, 0, ["public_tests_timeout"]
