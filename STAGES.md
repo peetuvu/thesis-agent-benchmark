@@ -1,33 +1,33 @@
 DEVELOPMENT STAGES — Thesis Benchmark Harness
 ================================================
 
-MVP target: 1 task family (Snake2), 2 architectures (single-agent baseline
+MVP target: 1 task family (Snake), 2 architectures (single-agent baseline
 + fixed 3-stage sequential pipeline), strict matched budgets, automated
 hidden eval, structured JSON logs. This alone is a defensible thesis
 contribution.
 
 ---------------------------------------------------------------
-STAGE A — Repo structure + task packaging            [~90% DONE]
+STAGE A — Repo structure + task packaging            [DONE]
 ---------------------------------------------------------------
 Difficulty: Easy (if frozen early)
 
 What exists:
 - agent-bench/, eval/, runner/, runs/ layout is stable
-- Snake2 task: spec, stub, public tests, hidden tests, eval script
+- Snake task: spec, stub, public tests, hidden tests, eval script
 - Architecture base class with full data model
 - pass@k estimator with tests
 
 Remaining:
-- [ ] Verify snake README covers ALL features tested by hidden tests
+- [x] Verify snake README covers ALL features tested by hidden tests
       (big food, obstacles, wrap mode, deterministic respawn algo)
-- [ ] Fill agent-bench/README.md with a brief description
-- [ ] Confirm prompts/ directory purpose — decide if prompt files
-      live per-task or globally
+- [x] Fill agent-bench/README.md with a brief description
+- [x] Confirm prompts/ directory purpose — prompts live globally
+      in agent-bench/prompts/, shared across all tasks
 
 Rule: Do NOT restructure directories after this stage.
 
 ---------------------------------------------------------------
-STAGE B — Sandbox policy (detect + invalidate)       [NOT STARTED]
+STAGE B — Sandbox policy (detect + invalidate)       [MOSTLY DONE]
 ---------------------------------------------------------------
 Difficulty: Medium
 
@@ -35,17 +35,17 @@ Approach: "detect and invalidate" — not "prevent."
 Full containerization is out of scope for now.
 
 Build:
-- [ ] Pre-run: hash eval/ directory contents (SHA256 manifest)
-- [ ] Post-run: re-hash and compare — fail run if anything changed
-- [ ] Post-run: check that only allowed files were modified
+- [x] Pre-run: hash eval/ directory contents (SHA256 manifest)
+- [x] Post-run: re-hash and compare — fail run if anything changed
+- [x] Post-run: check that only allowed files were modified
       (e.g., only game.py in the snake task)
-- [ ] Record policy compliance status in run log
+- [x] Record policy compliance status in run log
 - [ ] Document the policy in CLAUDE.md and in the thesis methodology
 
 Future (optional): Docker-based sandboxing if needed for SWE-bench.
 
 ---------------------------------------------------------------
-STAGE C — Runner / harness                           [NOT STARTED]
+STAGE C — Runner / harness                           [DONE]
 ---------------------------------------------------------------
 Difficulty: Medium → Hard (biggest time sink)
 
@@ -56,19 +56,20 @@ Core design decisions (lock these in):
 - Single entry point: `bench run --task snake --arch single_agent`
 - Explicit PYTHONPATH, explicit python executable, explicit cwd
 - Runner calls architecture.run(), then runs eval, then writes log
+- Real repo is never modified during a run — eval runs against temp
+  dir via BENCH_SOURCE_DIR env var
 
 Build order:
-- [ ] runner/config.py — RunConfig dataclass: model, provider, budget
-      limits (max_tokens, max_tool_calls, max_wall_clock), timeout,
-      prompt regime path, seed, task name, architecture name
-- [ ] runner/executor.py — Executor class:
+- [x] runner/config.py — RunConfig pydantic model + TaskPaths helper
+- [x] runner/executor.py — Executor class:
         1. Copy task dir to temp
         2. Call architecture.run(task_context)
         3. Run sandbox policy checks
         4. Run hidden eval (subprocess: bash eval/run_eval.sh <task>)
-        5. Collect results → RunResult
-- [ ] runner/cli.py — argparse CLI wired to executor
+        5. Collect results → RunLog
+- [x] runner/cli.py — argparse CLI wired to executor
       (entry point: `bench` command from pyproject.toml)
+- [x] 21 passing harness tests (tests/test_harness.py)
 
 Key contamination sources to guard against:
 - leftover __pycache__ / .pytest_cache
@@ -77,17 +78,17 @@ Key contamination sources to guard against:
 - working directory differences
 
 ---------------------------------------------------------------
-STAGE D — Logging + traceability                     [NOT STARTED]
+STAGE D — Logging + traceability                     [D1 DONE]
 ---------------------------------------------------------------
 Difficulty: Hard (most underestimated)
 
 Split into two sub-stages:
 
 D1: Schema + local JSON logging (do this first)
-- [ ] Define RunLog schema (pydantic model):
+- [x] Define RunLog schema (pydantic model):
         run_id (UUID), timestamp, git_commit, git_branch
         task_name, architecture_name, prompt_regime
-        model, provider, model_version
+        model, provider
         budget_config (max_tokens, max_tool_calls, max_wall_clock)
         actual_metrics (tokens_prompt, tokens_completion, tokens_total,
                         api_calls, wall_clock_seconds, estimated_cost)
@@ -97,9 +98,9 @@ D1: Schema + local JSON logging (do this first)
         policy_compliant (bool)
         stop_reason (string)
         notes (optional string)
-- [ ] Write each run as a JSON file in runs/<run_id>.json
-- [ ] Also write a human-readable markdown summary
-- [ ] Fields can be null — better null consistently than missing
+- [x] Write each run as a JSON file in runs/<run_id>.json
+- [x] Also write a human-readable markdown summary
+- [x] Fields can be null — better null consistently than missing
 
 D2: Provider-specific telemetry extraction (incremental)
 - [ ] Anthropic API: extract token usage from response metadata
@@ -173,11 +174,11 @@ Not writing code — keeping the system stable while adding:
 Engineering discipline, not cleverness.
 
 ---------------------------------------------------------------
-CURRENT POSITION (as of 2026-03-04)
+CURRENT POSITION (as of 2026-03-05)
 ---------------------------------------------------------------
-Stage A: ~90% done (verify snake README completeness)
-Stage B: Not started
-Stage C: Not started (this is the next priority)
-Stage D: Not started
-Stage E: Not started
+Stage A: Done
+Stage B: Mostly done (1 remaining: document policy in CLAUDE.md / thesis)
+Stage C: Done — runner/config.py, executor.py, cli.py, sandbox.py, 21 tests
+Stage D: D1 done (schema + JSON/markdown logs). D2 not started.
+Stage E: Not started — next action: E1 single-agent baseline
 Stage F: Not started
