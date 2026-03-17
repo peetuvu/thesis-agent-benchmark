@@ -30,3 +30,4 @@ runs/*.json
 # Secrets
 .env
 *.key
+CLAUDE.MD
