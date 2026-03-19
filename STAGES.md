@@ -133,14 +133,16 @@ Design:
 - ProviderError wraps SDK-specific auth/API errors
 
 ---------------------------------------------------------------
-STAGE E — Experiment orchestration                   [NOT STARTED]
+STAGE E — Experiment orchestration                   [E1 IN PROGRESS]
 ---------------------------------------------------------------
 Difficulty: Hard
 
 Stage incrementally — do NOT jump to ensembles:
 
 E1: Single-agent baseline (uses LLMProvider interface)
-- [ ] architectures/single_agent.py — one LLM call via ctx.provider, one shot
+- [x] architectures/single_agent.py — one LLM call via ctx.provider, one shot
+- [x] agent-bench/prompts/minimal.md — real minimal prompt template
+- [x] tests/test_single_agent.py — mocked unit tests
 - [ ] Validate full pipeline: run → eval → log
 - [ ] Run snake task, confirm hidden tests score correctly
 
