@@ -36,11 +36,16 @@ class OpenAIProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         seed: int | None = None,
+        thinking_enabled: bool = False,
     ) -> LLMResponse:
         """Send a completion request to the OpenAI API.
 
         OpenAI supports the `seed` parameter for reproducible outputs
         (beta feature). When provided, it is passed directly to the API.
+
+        Note: thinking_enabled is accepted for interface compatibility but
+        ignored. OpenAI o-series models (o3, o3-pro, o4-mini) reason by
+        default — no flag needed.
         """
         try:
             import openai

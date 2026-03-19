@@ -88,6 +88,7 @@ class SingleAgent(Architecture):
                 max_tokens=ctx.max_tokens,
                 temperature=0.0,
                 seed=ctx.seed,
+                thinking_enabled=ctx.thinking_enabled,
             )
         except ProviderError as e:
             return RunResult(

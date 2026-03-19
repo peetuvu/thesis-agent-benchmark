@@ -148,9 +148,9 @@ def shorten_model(model: str) -> str:
     """Extract a short model name by stripping vendor prefix and date suffix.
 
     Examples:
-        'claude-sonnet-4-20250514' -> 'sonnet-4'
+        'claude-haiku-4-5-20251001' -> 'haiku-4-5'
         'gpt-4o-2024-08-06' -> 'gpt-4o'
-        'claude-opus-4-6' -> 'opus-4-6'
+        'claude-sonnet-4-6' -> 'sonnet-4-6'
     """
     name = re.sub(r"^claude-", "", model)
     name = re.sub(r"-\d{8}$", "", name)
@@ -162,11 +162,11 @@ def make_run_filename(log: RunLog) -> str:
     """Build a descriptive filename stem from run metadata.
 
     Format: {timestamp}_{provider}_{model_short}_{architecture}_{task}_{prompt_regime}_{run_id_short}
-    Timestamp: DD-MM-YY_HHMM in Finnish time (Europe/Helsinki). Run ID short: first 8 chars.
+    Timestamp: YY-MM-DD_HHMM in Finnish time (Europe/Helsinki). Run ID short: first 8 chars.
     """
     helsinki = ZoneInfo("Europe/Helsinki")
     local_ts = log.timestamp.astimezone(helsinki)
-    ts = local_ts.strftime("%y-%d-%m_%H%M")
+    ts = local_ts.strftime("%y-%m-%d_%H%M")
     model_short = shorten_model(log.model)
     run_id_short = log.run_id[:8]
     return (

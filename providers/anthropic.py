@@ -40,12 +40,16 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         seed: int | None = None,
+        thinking_enabled: bool = False,
     ) -> LLMResponse:
         """Send a completion request to the Anthropic API.
 
         Note: The Anthropic API does not currently support a `seed` parameter.
         The parameter is accepted for interface compatibility but is not passed
         to the API. Temperature=0.0 provides near-deterministic output.
+
+        When thinking_enabled=True, extended thinking is activated with a
+        budget of 10000 tokens. Temperature must be 1.0 for thinking mode.
         """
         try:
             import anthropic
@@ -54,14 +58,22 @@ class AnthropicProvider(LLMProvider):
             # for large values. Budget enforcement is handled by the executor.
             api_max_tokens = min(max_tokens, _MAX_API_TOKENS)
 
-            response = await self._client.messages.create(
+            kwargs: dict = dict(
                 model=model,
                 max_tokens=api_max_tokens,
-                temperature=temperature,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
                 timeout=httpx.Timeout(300.0, connect=5.0),
             )
+
+            if thinking_enabled:
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+                # Anthropic requires temperature=1.0 when thinking is enabled
+                kwargs["temperature"] = 1.0
+            else:
+                kwargs["temperature"] = temperature
+
+            response = await self._client.messages.create(**kwargs)
         except anthropic.AuthenticationError as e:
             raise ProviderError("anthropic", f"Authentication failed: {e}") from e
         except anthropic.APIError as e:

@@ -61,16 +61,18 @@ class LLMProvider(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         seed: int | None = None,
+        thinking_enabled: bool = False,
     ) -> LLMResponse:
         """Send a completion request and return a standardized response.
 
         Args:
-            model: Model identifier (e.g. 'claude-sonnet-4-20250514', 'gpt-4o').
+            model: Model identifier (e.g. 'claude-sonnet-4-6', 'gpt-4o').
             system_prompt: System-level instructions.
             user_prompt: The user message / task prompt.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (0.0 = deterministic).
             seed: Random seed for reproducibility (provider support varies).
+            thinking_enabled: Enable extended thinking / reasoning mode.
 
         Returns:
             LLMResponse with text, token counts, and metadata.

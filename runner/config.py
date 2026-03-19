@@ -33,13 +33,14 @@ class RunConfig(BaseModel):
 
     task_name: str
     architecture_name: str
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     provider: str = "anthropic"
     prompt_regime: str = "minimal"
     max_tokens: int = 100_000
     max_tool_calls: int = 10
     max_wall_clock_seconds: float = 300.0
     seed: int | None = None
+    thinking_enabled: bool = False
     run_id: str = Field(default_factory=_generate_run_id)
     timestamp: datetime = Field(default_factory=_generate_timestamp)
 

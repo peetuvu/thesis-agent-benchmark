@@ -30,7 +30,7 @@ from runner.sandbox import check_policy, snapshot_directory
 class TestRunConfig:
     def test_defaults(self) -> None:
         cfg = RunConfig(task_name="snake", architecture_name="single_agent")
-        assert cfg.model == "claude-sonnet-4-20250514"
+        assert cfg.model == "claude-sonnet-4-6"
         assert cfg.provider == "anthropic"
         assert cfg.prompt_regime == "minimal"
         assert cfg.max_tokens == 100_000
@@ -172,7 +172,7 @@ def _make_run_log(**overrides: object) -> RunLog:
         task_name="snake",
         architecture_name="single_agent",
         prompt_regime="minimal",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         provider="anthropic",
         budget_config=BudgetConfig(),
         actual_metrics=ActualMetrics(
@@ -232,7 +232,7 @@ class TestRunLog:
 
         # Filenames use the new descriptive format
         # UTC 12:00 -> Helsinki 14:00 (EET, UTC+2; DST starts last Sun of March)
-        expected_stem = "26-05-03_1400_anthropic_sonnet-4_single_agent_snake_minimal_test-uui"
+        expected_stem = "26-03-05_1400_anthropic_sonnet-4-6_single_agent_snake_minimal_test-uui"
         assert json_path.stem == expected_stem
         assert md_path.stem == expected_stem
 
@@ -255,7 +255,7 @@ class TestRunLog:
 
 class TestShortenModel:
     def test_claude_with_date(self) -> None:
-        assert shorten_model("claude-sonnet-4-20250514") == "sonnet-4"
+        assert shorten_model("claude-haiku-4-5-20251001") == "haiku-4-5"
 
     def test_gpt_with_date(self) -> None:
         assert shorten_model("gpt-4o-2024-08-06") == "gpt-4o"
@@ -271,7 +271,7 @@ class TestMakeRunFilename:
     def test_format(self) -> None:
         log = _make_run_log()
         filename = make_run_filename(log)
-        assert filename == "26-05-03_1400_anthropic_sonnet-4_single_agent_snake_minimal_test-uui"
+        assert filename == "26-05-03_1400_anthropic_sonnet-4-6_single_agent_snake_minimal_test-uui"
 
     def test_different_provider(self) -> None:
         log = _make_run_log(provider="openai", model="gpt-4o-2024-08-06")

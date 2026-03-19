@@ -243,6 +243,7 @@ class Executor:
             timeout_seconds=config.max_wall_clock_seconds,
             model=config.model,
             seed=config.seed,
+            thinking_enabled=config.thinking_enabled,
             provider=provider,
         )
 

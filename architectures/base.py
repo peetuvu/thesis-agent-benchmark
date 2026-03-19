@@ -57,11 +57,14 @@ class TaskContext:
     timeout_seconds: float = 300.0
     """Wall-clock time limit for the run."""
 
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     """Model identifier to use."""
 
     seed: int | None = None
     """Random seed for reproducibility where supported."""
+
+    thinking_enabled: bool = False
+    """Whether to enable extended thinking / reasoning mode."""
 
     provider: LLMProvider | None = None
     """LLM provider instance for making API calls."""
