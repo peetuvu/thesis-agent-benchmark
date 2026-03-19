@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import os
 
+import httpx
+
 from providers.base import LLMProvider, LLMResponse, ProviderError
+
+_MAX_API_TOKENS = 16384
 
 
 class AnthropicProvider(LLMProvider):
@@ -46,12 +50,17 @@ class AnthropicProvider(LLMProvider):
         try:
             import anthropic
 
+            # Cap max_tokens to avoid SDK ValueError requiring streaming
+            # for large values. Budget enforcement is handled by the executor.
+            api_max_tokens = min(max_tokens, _MAX_API_TOKENS)
+
             response = await self._client.messages.create(
                 model=model,
-                max_tokens=max_tokens,
+                max_tokens=api_max_tokens,
                 temperature=temperature,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
+                timeout=httpx.Timeout(300.0, connect=5.0),
             )
         except anthropic.AuthenticationError as e:
             raise ProviderError("anthropic", f"Authentication failed: {e}") from e

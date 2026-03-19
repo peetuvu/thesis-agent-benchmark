@@ -282,7 +282,7 @@ class Executor:
         try:
             proc = subprocess.run(
                 [
-                    sys.executable, "-m", "pytest", "-v", "--tb=line", "-q",
+                    sys.executable, "-m", "pytest", "-v", "--tb=line",
                     str(tests_dir),
                 ],
                 capture_output=True,

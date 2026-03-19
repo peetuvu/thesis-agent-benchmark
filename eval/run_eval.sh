@@ -25,4 +25,4 @@ export BENCH_SOURCE_DIR="$AGENT_DIR"
 
 # Run ONLY hidden tests and ignore any pytest.ini that might cause recursive collection
 echo "Running hidden evaluation for task: $TASK"
-pytest -v --tb=line -q -c /dev/null "$TEST_DIR"
+pytest -v --tb=line -c /dev/null "$TEST_DIR"
