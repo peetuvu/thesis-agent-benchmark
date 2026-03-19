@@ -111,14 +111,36 @@ D2: Provider-specific telemetry extraction (incremental)
       for provider Y
 
 ---------------------------------------------------------------
+STAGE D3 — Provider abstraction layer                [DONE] (effectively)
+---------------------------------------------------------------
+Difficulty: Medium
+
+Build:
+- [x] providers/base.py — LLMResponse dataclass + LLMProvider ABC + ProviderError
+- [x] providers/anthropic.py — Anthropic Claude SDK wrapper
+- [x] providers/openai.py — OpenAI GPT SDK wrapper
+- [x] providers/__init__.py — get_provider() dynamic loader + registry
+- [x] TaskContext.provider field added to architectures/base.py
+- [x] Executor instantiates provider from RunConfig.provider
+- [x] tests/test_providers.py — mocked unit tests (no real API calls)
+- [ ] providers/google.py — Google Gemini SDK wrapper (add when needed)
+- [ ] End-to-end smoke test with real API keys
+
+Design:
+- Architectures call ctx.provider.complete() — never import SDKs directly
+- get_provider("anthropic") dynamically loads AnthropicProvider
+- LLMResponse standardizes text, token counts, stop_reason across providers
+- ProviderError wraps SDK-specific auth/API errors
+
+---------------------------------------------------------------
 STAGE E — Experiment orchestration                   [NOT STARTED]
 ---------------------------------------------------------------
 Difficulty: Hard
 
 Stage incrementally — do NOT jump to ensembles:
 
-E1: Single-agent baseline
-- [ ] architectures/single_agent.py — one LLM call, one shot
+E1: Single-agent baseline (uses LLMProvider interface)
+- [ ] architectures/single_agent.py — one LLM call via ctx.provider, one shot
 - [ ] Validate full pipeline: run → eval → log
 - [ ] Run snake task, confirm hidden tests score correctly
 

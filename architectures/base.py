@@ -7,7 +7,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from providers.base import LLMProvider
 
 
 class RunStatus(Enum):
@@ -59,6 +62,9 @@ class TaskContext:
 
     seed: int | None = None
     """Random seed for reproducibility where supported."""
+
+    provider: LLMProvider | None = None
+    """LLM provider instance for making API calls."""
 
 
 @dataclass

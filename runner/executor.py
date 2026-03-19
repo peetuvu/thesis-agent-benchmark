@@ -13,6 +13,7 @@ import traceback
 from pathlib import Path
 
 from architectures.base import Architecture, RunMetrics, RunResult, RunStatus, TaskContext
+from providers import get_provider
 from runner.config import RunConfig, TaskPaths
 from runner.logger import (
     ActualMetrics,
@@ -176,7 +177,8 @@ class Executor:
         architecture: Architecture,
     ) -> RunResult:
         """Build TaskContext and call architecture.run_timed() with timeout."""
-        ctx = self._build_context(config, paths, temp_task_dir)
+        provider = get_provider(config.provider)
+        ctx = self._build_context(config, paths, temp_task_dir, provider)
 
         try:
             result = await asyncio.wait_for(
@@ -201,7 +203,8 @@ class Executor:
         return result
 
     def _build_context(
-        self, config: RunConfig, paths: TaskPaths, temp_task_dir: Path
+        self, config: RunConfig, paths: TaskPaths, temp_task_dir: Path,
+        provider: object | None = None,
     ) -> TaskContext:
         """Assemble a TaskContext from config and temp directory."""
         # Read task spec
@@ -240,6 +243,7 @@ class Executor:
             timeout_seconds=config.max_wall_clock_seconds,
             model=config.model,
             seed=config.seed,
+            provider=provider,
         )
 
     def _apply_modified_files(self, modified: dict[str, str], temp_task_dir: Path) -> None:
