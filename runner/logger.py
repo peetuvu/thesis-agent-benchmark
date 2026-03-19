@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
@@ -142,12 +144,44 @@ def _render_markdown(log: RunLog) -> str:
     return "\n".join(lines)
 
 
+def shorten_model(model: str) -> str:
+    """Extract a short model name by stripping vendor prefix and date suffix.
+
+    Examples:
+        'claude-sonnet-4-20250514' -> 'sonnet-4'
+        'gpt-4o-2024-08-06' -> 'gpt-4o'
+        'claude-opus-4-6' -> 'opus-4-6'
+    """
+    name = re.sub(r"^claude-", "", model)
+    name = re.sub(r"-\d{8}$", "", name)
+    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", name)
+    return name
+
+
+def make_run_filename(log: RunLog) -> str:
+    """Build a descriptive filename stem from run metadata.
+
+    Format: {timestamp}_{provider}_{model_short}_{architecture}_{task}_{prompt_regime}_{run_id_short}
+    Timestamp: DD-MM-YY_HHMM in Finnish time (Europe/Helsinki). Run ID short: first 8 chars.
+    """
+    helsinki = ZoneInfo("Europe/Helsinki")
+    local_ts = log.timestamp.astimezone(helsinki)
+    ts = local_ts.strftime("%y-%d-%m_%H%M")
+    model_short = shorten_model(log.model)
+    run_id_short = log.run_id[:8]
+    return (
+        f"{ts}_{log.provider}_{model_short}_{log.architecture_name}"
+        f"_{log.task_name}_{log.prompt_regime}_{run_id_short}"
+    )
+
+
 def save_run_log(log: RunLog, runs_dir: Path) -> tuple[Path, Path]:
     """Write run log as JSON and markdown. Returns (json_path, md_path)."""
     runs_dir.mkdir(parents=True, exist_ok=True)
 
-    json_path = runs_dir / f"{log.run_id}.json"
-    md_path = runs_dir / f"{log.run_id}.md"
+    stem = make_run_filename(log)
+    json_path = runs_dir / f"{stem}.json"
+    md_path = runs_dir / f"{stem}.md"
 
     json_path.write_text(
         json.dumps(log.model_dump(mode="json"), indent=2, default=str) + "\n"

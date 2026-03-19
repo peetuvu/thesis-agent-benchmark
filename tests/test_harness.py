@@ -15,7 +15,9 @@ from runner.logger import (
     EvalResults,
     RunLog,
     get_git_info,
+    make_run_filename,
     save_run_log,
+    shorten_model,
 )
 from runner.sandbox import check_policy, snapshot_directory
 
@@ -228,7 +230,13 @@ class TestRunLog:
         assert json_path.suffix == ".json"
         assert md_path.suffix == ".md"
 
-        # JSON is valid and has expected content
+        # Filenames use the new descriptive format
+        # UTC 12:00 -> Helsinki 14:00 (EET, UTC+2; DST starts last Sun of March)
+        expected_stem = "26-05-03_1400_anthropic_sonnet-4_single_agent_snake_minimal_test-uui"
+        assert json_path.stem == expected_stem
+        assert md_path.stem == expected_stem
+
+        # JSON is valid and has expected content (full run_id preserved inside)
         data = json.loads(json_path.read_text())
         assert data["run_id"] == "test-uuid-1234"
 
@@ -243,6 +251,32 @@ class TestRunLog:
         _, md_path = save_run_log(log, tmp_path)
         md = md_path.read_text()
         assert "test_wrap" in md
+
+
+class TestShortenModel:
+    def test_claude_with_date(self) -> None:
+        assert shorten_model("claude-sonnet-4-20250514") == "sonnet-4"
+
+    def test_gpt_with_date(self) -> None:
+        assert shorten_model("gpt-4o-2024-08-06") == "gpt-4o"
+
+    def test_claude_no_date(self) -> None:
+        assert shorten_model("claude-opus-4-6") == "opus-4-6"
+
+    def test_plain_model(self) -> None:
+        assert shorten_model("gemini-pro") == "gemini-pro"
+
+
+class TestMakeRunFilename:
+    def test_format(self) -> None:
+        log = _make_run_log()
+        filename = make_run_filename(log)
+        assert filename == "26-05-03_1400_anthropic_sonnet-4_single_agent_snake_minimal_test-uui"
+
+    def test_different_provider(self) -> None:
+        log = _make_run_log(provider="openai", model="gpt-4o-2024-08-06")
+        filename = make_run_filename(log)
+        assert "openai_gpt-4o_" in filename
 
 
 class TestGitInfo:
