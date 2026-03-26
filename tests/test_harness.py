@@ -271,7 +271,7 @@ class TestMakeRunFilename:
     def test_format(self) -> None:
         log = _make_run_log()
         filename = make_run_filename(log)
-        assert filename == "26-05-03_1400_anthropic_sonnet-4-6_single_agent_snake_minimal_test-uui"
+        assert filename == "26-03-05_1400_anthropic_sonnet-4-6_single_agent_snake_minimal_test-uui"
 
     def test_different_provider(self) -> None:
         log = _make_run_log(provider="openai", model="gpt-4o-2024-08-06")
