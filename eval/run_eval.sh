@@ -12,17 +12,21 @@ if [ ! -d "$TEST_DIR" ]; then
   exit 1
 fi
 
-# Activate venv (adjust if yours differs)
-if [ -f "$ROOT/.venv/bin/activate" ]; then
-  # shellcheck disable=SC1090
-  source "$ROOT/.venv/bin/activate"
+# Resolve Python: prefer venv, fall back to system python3
+if [ -f "$ROOT/.venv/bin/python" ]; then
+  PYTHON="$ROOT/.venv/bin/python"
+else
+  PYTHON="$(command -v python3 || command -v python)"
 fi
 
-# Ensure Python can import: snake (from agent task dir) and eval (from repo root)
+# Ensure Python can import: task package (from agent task dir) and eval (from repo root)
 export PYTHONPATH="$AGENT_DIR:$ROOT"
 # Tell conftest.py to resolve imports from the custom source dir
 export BENCH_SOURCE_DIR="$AGENT_DIR"
 
-# Run ONLY hidden tests and ignore any pytest.ini that might cause recursive collection
+# Run ONLY hidden tests.  --rootdir keeps the rootdir inside $TEST_DIR so
+# no parent pytest.ini (e.g. pyproject.toml testpaths) interferes.
+# -p no:cacheprovider avoids permission errors when rootdir is read-only.
 echo "Running hidden evaluation for task: $TASK"
-pytest -v --tb=line -c /dev/null "$TEST_DIR"
+"$PYTHON" -m pytest -v --tb=line --rootdir="$TEST_DIR" -p no:cacheprovider \
+  --override-ini="addopts=" "$TEST_DIR"
