@@ -133,7 +133,7 @@ Design:
 - ProviderError wraps SDK-specific auth/API errors
 
 ---------------------------------------------------------------
-STAGE E — Experiment orchestration                   [E1 IN PROGRESS]
+STAGE E — Experiment orchestration                   [E2 IN PROGRESS]
 ---------------------------------------------------------------
 Difficulty: Hard
 
@@ -147,9 +147,10 @@ E1: Single-agent baseline (uses LLMProvider interface)
 - [ ] Run snake task, confirm hidden tests score correctly
 
 E2: Fixed-length sequential pipeline (no loops)
-- [ ] architectures/sequential.py — plan → implement → review → fix
-- [ ] Fixed 4 steps, no iteration
-- [ ] Same budget constraints as single-agent
+- [x] architectures/sequential.py — plan → implement → review → fix
+- [x] Fixed 4 steps, no iteration
+- [x] Same budget constraints as single-agent
+- [x] tests/test_sequential.py — mocked unit tests
 
 E3: Add iteration (review/fix loops)
 - [ ] Configurable max_iterations
