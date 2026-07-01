@@ -13,6 +13,9 @@ from providers.models import list_models, resolve_model
 from runner.config import RunConfig
 from runner.executor import Executor
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 def _load_architecture(name: str) -> Architecture:
     """Dynamically import and instantiate an Architecture subclass by module name.

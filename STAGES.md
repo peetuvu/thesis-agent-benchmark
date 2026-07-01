@@ -143,8 +143,8 @@ E1: Single-agent baseline (uses LLMProvider interface)
 - [x] architectures/single_agent.py — one LLM call via ctx.provider, one shot
 - [x] agent-bench/prompts/minimal.md — real minimal prompt template
 - [x] tests/test_single_agent.py — mocked unit tests
-- [ ] Validate full pipeline: run → eval → log
-- [ ] Run snake task, confirm hidden tests score correctly
+- [x] Validate full pipeline: run → eval → log
+- [x] Run snake task, confirm hidden tests score correctly
 
 E2: Fixed-length sequential pipeline (no loops)
 - [x] architectures/sequential.py — plan → implement → review → fix
@@ -158,7 +158,7 @@ E3: Add iteration (review/fix loops)
 - [ ] "Who gets to run tests when" rules must be consistent
 
 E4: Additional architectures (only if time permits)
-- [ ] Parallel ensemble with aggregation
+- [ ] Parallel ensemble with a collection
 - [ ] Adversarial debate
 - [ ] Blackboard/shared memory
 

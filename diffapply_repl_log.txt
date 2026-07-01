@@ -1,0 +1,163 @@
+nohup: ignoring input
+
+==================================================
+Run:    89062cff-e6a4-43ec-b0db-44f73972d942
+Status: failure
+Hidden: 4/15 passed
+Public: 1/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1318_anthropic_haiku-4-5_single_agent_diffapply_minimal_89062cff.json
+==================================================
+
+==================================================
+Run:    958de2ba-e80a-4ff4-9427-e60270eb2bf2
+Status: failure
+Hidden: 4/15 passed
+Public: 1/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1318_anthropic_haiku-4-5_single_agent_diffapply_minimal_958de2ba.json
+==================================================
+
+==================================================
+Run:    8b73f5a5-539a-4535-8820-b45552155171
+Status: failure
+Hidden: 4/15 passed
+Public: 1/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1318_anthropic_haiku-4-5_single_agent_diffapply_minimal_8b73f5a5.json
+==================================================
+
+==================================================
+Run:    40c431c4-8e85-4efd-801c-e23ee92812dd
+Status: failure
+Hidden: 10/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1319_anthropic_haiku-4-5_single_agent_diffapply_production_40c431c4.json
+==================================================
+
+==================================================
+Run:    398262a3-4523-4447-9078-f77d59b16162
+Status: failure
+Hidden: 4/15 passed
+Public: 1/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1320_anthropic_haiku-4-5_single_agent_diffapply_production_398262a3.json
+==================================================
+
+==================================================
+Run:    6a84092e-6c80-4621-af94-e4350e75df9b
+Status: failure
+Hidden: 4/15 passed
+Public: 1/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1320_anthropic_haiku-4-5_single_agent_diffapply_production_6a84092e.json
+==================================================
+
+==================================================
+Run:    d6ca576f-3fbf-4761-8ab9-b9ce22a137b3
+Status: failure
+Hidden: 13/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1321_anthropic_sonnet-4-6_single_agent_diffapply_minimal_d6ca576f.json
+==================================================
+
+==================================================
+Run:    0b69ebba-16dc-4e59-8ac5-9f4849aea09f
+Status: failure
+Hidden: 11/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1321_anthropic_sonnet-4-6_single_agent_diffapply_minimal_0b69ebba.json
+==================================================
+
+==================================================
+Run:    4c6cf5c0-fc7a-4b4f-86b8-81512a48d30b
+Status: failure
+Hidden: 12/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1322_anthropic_sonnet-4-6_single_agent_diffapply_minimal_4c6cf5c0.json
+==================================================
+
+==================================================
+Run:    7d012e97-6489-44b2-9ec5-3e159a137866
+Status: failure
+Hidden: 13/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1323_anthropic_sonnet-4-6_single_agent_diffapply_production_7d012e97.json
+==================================================
+
+==================================================
+Run:    2caaa8a6-0cd8-476e-91a1-23e5935f79b9
+Status: failure
+Hidden: 14/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1325_anthropic_sonnet-4-6_single_agent_diffapply_production_2caaa8a6.json
+==================================================
+
+==================================================
+Run:    e0a94923-ff99-4430-a0c4-6eea7b044847
+Status: failure
+Hidden: 13/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1326_anthropic_sonnet-4-6_single_agent_diffapply_production_e0a94923.json
+==================================================
+
+==================================================
+Run:    5de18b67-9891-49ee-abd3-647ecb45452e
+Status: failure
+Hidden: 13/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1328_anthropic_opus-4-6_single_agent_diffapply_minimal_5de18b67.json
+==================================================
+
+==================================================
+Run:    51263710-f364-44b3-a4be-7c450afeed04
+Status: success
+Hidden: 15/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1329_anthropic_opus-4-6_single_agent_diffapply_minimal_51263710.json
+==================================================
+
+==================================================
+Run:    198f9d56-919e-44cb-95a1-df5f3a2f87f9
+Status: success
+Hidden: 15/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1330_anthropic_opus-4-6_single_agent_diffapply_minimal_198f9d56.json
+==================================================
+
+==================================================
+Run:    ce7cd7ab-6d63-488e-a05c-475981935fbf
+Status: failure
+Hidden: 14/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1330_anthropic_opus-4-6_single_agent_diffapply_production_ce7cd7ab.json
+==================================================
+
+==================================================
+Run:    4a2aefc3-47c6-430f-8621-5bd6e2fb1989
+Status: success
+Hidden: 15/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1331_anthropic_opus-4-6_single_agent_diffapply_production_4a2aefc3.json
+==================================================
+
+==================================================
+Run:    2560aae0-b5a9-4dc2-a5b0-5732eab3c820
+Status: failure
+Hidden: 14/15 passed
+Public: 5/5 passed
+Policy: compliant
+Log:    runs/26-06-24_1332_anthropic_opus-4-6_single_agent_diffapply_production_2560aae0.json
+==================================================
