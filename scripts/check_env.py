@@ -14,6 +14,9 @@ import os
 import shutil
 import sys
 
+from dotenv import load_dotenv
+load_dotenv()
+
 MIN_PYTHON = (3, 11)
 
 
