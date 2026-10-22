@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+# Provider-native stop reasons meaning "generation ended normally".
+# Anything else (e.g. 'max_tokens', 'length', 'refusal', 'content_filter')
+# is surfaced in the run log's stop_reason.
+NORMAL_STOP_REASONS: frozenset[str] = frozenset({"end_turn", "stop_sequence", "stop"})
+
+# Provider-native stop reasons meaning "output was cut off at the token cap".
+TRUNCATION_STOP_REASONS: frozenset[str] = frozenset({"max_tokens", "length"})
 
 
 @dataclass
@@ -32,6 +40,20 @@ class LLMResponse:
 
     raw_response: Any = None
     """Original SDK response object, kept for debugging. Not serialized."""
+
+    request_params: dict[str, Any] = field(default_factory=dict)
+    """Sampling parameters actually sent to the API, after provider adjustments.
+
+    Standard keys: temperature, max_output_tokens, seed, reasoning_effort,
+    thinking_budget_tokens. A value of None means the parameter was not sent
+    (the provider's default applied).
+    """
+
+    usage_details: dict[str, int] = field(default_factory=dict)
+    """Provider-specific token breakdowns (e.g. reasoning_tokens, cached_input_tokens).
+
+    These are subsets of input_tokens/output_tokens, not additions to them.
+    """
 
     @property
     def total_tokens(self) -> int:

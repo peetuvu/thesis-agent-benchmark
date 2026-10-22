@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 
-import httpx
-
 from providers.base import LLMProvider, LLMResponse, ProviderError
 
 _MAX_API_TOKENS = 16384
@@ -50,6 +48,11 @@ class AnthropicProvider(LLMProvider):
 
         When thinking_enabled=True, extended thinking is activated with a
         budget of 10000 tokens. Temperature must be 1.0 for thinking mode.
+
+        SDK 1.x removed temperature from the messages.create() signature but
+        still sends anthropic-version 2023-06-01, where the API accepts it, so
+        it is passed via extra_body. Do not upgrade to SDK 2.x: it sends
+        2026-10-21, which rejects temperature with HTTP 400.
         """
         try:
             import anthropic
@@ -63,15 +66,16 @@ class AnthropicProvider(LLMProvider):
                 max_tokens=api_max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                timeout=httpx.Timeout(300.0, connect=5.0),
+                timeout=anthropic.Timeout(300.0, connect=5.0),
             )
 
             if thinking_enabled:
                 kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
                 # Anthropic requires temperature=1.0 when thinking is enabled
-                kwargs["temperature"] = 1.0
+                sent_temperature = 1.0
             else:
-                kwargs["temperature"] = temperature
+                sent_temperature = temperature
+            kwargs["extra_body"] = {"temperature": sent_temperature}
 
             response = await self._client.messages.create(**kwargs)
         except anthropic.AuthenticationError as e:
@@ -91,4 +95,13 @@ class AnthropicProvider(LLMProvider):
             model=response.model,
             stop_reason=response.stop_reason,
             raw_response=response,
+            request_params={
+                "temperature": sent_temperature,
+                "max_output_tokens": api_max_tokens,
+                "seed": None,  # not supported by the Anthropic API
+                "reasoning_effort": None,
+                "thinking_budget_tokens": (
+                    kwargs["thinking"]["budget_tokens"] if thinking_enabled else None
+                ),
+            },
         )

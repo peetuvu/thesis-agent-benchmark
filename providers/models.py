@@ -15,15 +15,14 @@ MODELS: dict[str, ModelInfo] = {
     "opus-4.6": {"api_string": "claude-opus-4-6", "provider": "anthropic", "tier": "flagship", "description": "The most intelligent model for building agents and coding"},
     "sonnet-4.6": {"api_string": "claude-sonnet-4-6", "provider": "anthropic", "tier": "mid", "description": "The best combination of speed and intelligence"},
     "haiku-4.5": {"api_string": "claude-haiku-4-5-20251001", "provider": "anthropic", "tier": "fast", "description": "The fastest model with near-frontier intelligence"},
-    # OpenAI
-    "gpt-5.4": {"api_string": "gpt-5.4", "provider": "openai", "tier": "Flagship (plus-subscription)", "description": "Best intelligence at scale for agentic, coding, and professional workflows"} ,
-    "GPT-5.4 pro": {"api_string": "GPT-5.4-pro", "provider": "openai", "tier": "Flagship (pro-subscription)", "description": "Version of GPT-5.4 that produces smarter and more precise responses."},
-    "gpt-4o": {"api_string": "gpt-4o", "provider": "openai", "tier": "mid", "description": "Fast, intelligent, flexible GPT model"},
-    "gpt-4.1": {"api_string": "gpt-4.1", "provider": "openai", "tier": "mid", "description": "Smartest non-reasoning model"},
-    "gpt-4.1-mini": {"api_string": "gpt-4.1-mini", "provider": "openai", "tier": "fast", "description": "Smaller, faster version of GPT-4.1"},
-    "o3": {"api_string": "o3", "provider": "openai", "tier": "good", "description": "Reasoning model for complex tasks, succeeded by GPT-5"},
-    "o3-pro": {"api_string": "o3-pro", "provider": "openai", "tier": "good", "description": "Version of o3 with more compute for better responses"},
-    "o4-mini": {"api_string": "o4-mini", "provider": "openai", "tier": "fast", "description": "Fast, cost-efficient reasoning model, succeeded by GPT-5 mini"},
+    # OpenAI — GPT-5.6 family (verified against developers.openai.com, 2026-10-22).
+    # These are reasoning models; "min_reasoning_effort" is the lowest effort the
+    # model accepts. With "none" they run effectively non-reasoning and the
+    # provider sends temperature (see providers/openai.py). OpenAI documents
+    # temperature-at-"none" for GPT-6; for GPT-5.6 it is confirmed by smoke test.
+    "gpt-5.6-sol": {"api_string": "gpt-5.6-sol", "provider": "openai", "tier": "flagship", "min_reasoning_effort": "none", "description": "Most capable GPT-5.6 model ($4/$20 per MTok)"},
+    "gpt-5.6-terra": {"api_string": "gpt-5.6-terra", "provider": "openai", "tier": "mid", "min_reasoning_effort": "none", "description": "Balanced GPT-5.6 model ($2/$12 per MTok)"},
+    "gpt-5.6-luna": {"api_string": "gpt-5.6-luna", "provider": "openai", "tier": "fast", "min_reasoning_effort": "none", "description": "Fast, low-cost GPT-5.6 model ($0.2/$1.2 per MTok)"},
 }
 
 
@@ -33,6 +32,14 @@ def get_model(alias: str) -> ModelInfo:
         available = ", ".join(sorted(MODELS.keys()))
         raise KeyError(f"Unknown model alias '{alias}'. Available: {available}")
     return MODELS[alias]
+
+
+def get_model_by_api_string(api_string: str) -> ModelInfo | None:
+    """Look up registry metadata by API model string. Returns None if unregistered."""
+    for info in MODELS.values():
+        if info["api_string"] == api_string:
+            return info
+    return None
 
 
 def resolve_model(alias_or_raw: str) -> tuple[str, str | None]:

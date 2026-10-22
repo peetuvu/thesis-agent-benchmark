@@ -14,12 +14,21 @@ from pathlib import Path
 
 from architectures.base import Architecture, RunMetrics, RunResult, RunStatus, TaskContext
 from providers import get_provider
+from providers.base import (
+    NORMAL_STOP_REASONS,
+    TRUNCATION_STOP_REASONS,
+    LLMProvider,
+    LLMResponse,
+    ProviderError,
+)
 from runner.config import RunConfig, TaskPaths
 from runner.logger import (
     ActualMetrics,
     BudgetConfig,
     EvalResults,
+    LLMCallRecord,
     RunLog,
+    SamplingConfig,
     get_git_info,
     save_run_log,
 )
@@ -48,6 +57,117 @@ def _parse_pytest_output(stdout: str, stderr: str) -> tuple[int, int, list[str]]
 
     total = passed + failed
     return passed, total, failing_names
+
+
+# Sentinel "failing test names" returned when the hidden eval yields no results.
+_COLLECTION_ERROR = "hidden_eval_collection_error"
+_NO_RESULTS = "hidden_eval_no_results"
+
+
+class _RecordingProvider(LLMProvider):
+    """Transparent wrapper that records every call made through a provider.
+
+    Lets the executor log what was actually sent and why each call stopped,
+    for any architecture, without architectures having to report it.
+    """
+
+    def __init__(self, inner: LLMProvider) -> None:
+        self._inner = inner
+        self.calls: list[LLMCallRecord] = []
+
+    @property
+    def name(self) -> str:
+        return self._inner.name
+
+    async def complete(
+        self,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        seed: int | None = None,
+        thinking_enabled: bool = False,
+    ) -> LLMResponse:
+        try:
+            response = await self._inner.complete(
+                model=model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                seed=seed,
+                thinking_enabled=thinking_enabled,
+            )
+        except ProviderError as e:
+            self.calls.append(LLMCallRecord(model=model, error=str(e)))
+            raise
+        self.calls.append(LLMCallRecord(
+            model=response.model,
+            stop_reason=response.stop_reason,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            request_params=response.request_params,
+            usage_details=response.usage_details,
+        ))
+        return response
+
+
+def _derive_outcome(
+    result: RunResult,
+    hidden_passed: int,
+    hidden_total: int,
+    hidden_failing: list[str],
+    allowed_edit_files: list[str],
+    calls: list[LLMCallRecord],
+) -> tuple[str, str | None]:
+    """Determine the run's final (status, stop_reason).
+
+    Guarantees a run never ends as "success" without a positive hidden score,
+    and that the stop_reason explains why when the output was unusable.
+    """
+    status = result.status.value
+    reasons: list[str] = [result.error_message] if result.error_message else []
+
+    if result.status == RunStatus.SUCCESS:
+        editable = set(allowed_edit_files)
+        if editable and not editable.intersection(result.modified_files):
+            status = RunStatus.FAILURE.value
+            reasons.append(
+                "Labeled code blocks found but none target an editable file "
+                f"(got: {', '.join(sorted(result.modified_files))}; "
+                f"editable: {', '.join(sorted(editable))})"
+            )
+        if hidden_total == 0:
+            detail = next(
+                (n for n in hidden_failing if n.startswith((_COLLECTION_ERROR, _NO_RESULTS))),
+                _NO_RESULTS,
+            )
+            if detail.startswith(_COLLECTION_ERROR):
+                # The generated code broke test collection (syntax/import error).
+                status = RunStatus.FAILURE.value
+                reasons.append(
+                    "Hidden eval could not collect tests: generated code likely "
+                    "has a syntax or import error"
+                )
+            else:
+                # No test outcomes and no collection error: the eval itself failed.
+                status = RunStatus.ERROR.value
+                reasons.append(f"Hidden eval produced no test results ({detail})")
+        elif hidden_passed < hidden_total:
+            status = RunStatus.FAILURE.value
+
+    last = next((c for c in reversed(calls) if c.error is None), None)
+    if last is not None and last.stop_reason not in NORMAL_STOP_REASONS:
+        if last.stop_reason in TRUNCATION_STOP_REASONS:
+            reasons.append(
+                f"Last LLM call hit the output token cap (stop_reason={last.stop_reason}); "
+                "output may be truncated"
+            )
+        else:
+            reasons.append(f"Last LLM call ended with stop_reason={last.stop_reason}")
+
+    return status, "; ".join(reasons) if reasons else None
 
 
 class Executor:
@@ -85,7 +205,9 @@ class Executor:
             task_pre = snapshot_directory(temp_task_dir)
 
             # --- 4. Run architecture in temp dir ---
-            result = await self._run_architecture(config, paths, temp_task_dir, architecture)
+            result, llm_calls = await self._run_architecture(
+                config, paths, temp_task_dir, architecture,
+            )
 
             # --- 5. Write modified files into the temp dir ---
             self._apply_modified_files(result.modified_files, temp_task_dir)
@@ -117,11 +239,10 @@ class Executor:
             # --- 11. Assemble RunLog ---
             git_commit, git_branch = get_git_info()
 
-            status = result.status.value
-            stop_reason = result.error_message
-            if result.status == RunStatus.SUCCESS and hidden_total > 0:
-                if hidden_passed < hidden_total:
-                    status = RunStatus.FAILURE.value
+            status, stop_reason = _derive_outcome(
+                result, hidden_passed, hidden_total, hidden_failing,
+                paths.allowed_edit_files, llm_calls,
+            )
 
             log = RunLog(
                 run_id=config.run_id,
@@ -138,6 +259,7 @@ class Executor:
                     max_tool_calls=config.max_tool_calls,
                     max_wall_clock_seconds=config.max_wall_clock_seconds,
                 ),
+                sampling=SamplingConfig.from_calls(llm_calls),
                 actual_metrics=ActualMetrics(
                     tokens_prompt=result.metrics.input_tokens,
                     tokens_completion=result.metrics.output_tokens,
@@ -153,6 +275,7 @@ class Executor:
                     hidden_total=hidden_total,
                     failing_test_names=hidden_failing + public_failing,
                 ),
+                llm_calls=llm_calls,
                 status=status,
                 policy_compliant=policy_compliant,
                 stop_reason=stop_reason,
@@ -175,9 +298,12 @@ class Executor:
         paths: TaskPaths,
         temp_task_dir: Path,
         architecture: Architecture,
-    ) -> RunResult:
-        """Build TaskContext and call architecture.run_timed() with timeout."""
-        provider = get_provider(config.provider)
+    ) -> tuple[RunResult, list[LLMCallRecord]]:
+        """Build TaskContext and call architecture.run_timed() with timeout.
+
+        Returns the result and a record of every LLM call the architecture made.
+        """
+        provider = _RecordingProvider(get_provider(config.provider))
         ctx = self._build_context(config, paths, temp_task_dir, provider)
 
         try:
@@ -200,7 +326,7 @@ class Executor:
                 error_message=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
             )
 
-        return result
+        return result, provider.calls
 
     def _build_context(
         self, config: RunConfig, paths: TaskPaths, temp_task_dir: Path,
@@ -272,7 +398,16 @@ class Executor:
         except FileNotFoundError:
             return 0, 0, ["eval_script_not_found"]
 
-        return _parse_pytest_output(proc.stdout, proc.stderr)
+        passed, total, failing = _parse_pytest_output(proc.stdout, proc.stderr)
+        if total == 0:
+            combined = proc.stdout + "\n" + proc.stderr
+            if "during collection" in combined:
+                failing = failing + [_COLLECTION_ERROR]
+            else:
+                lines = [ln for ln in combined.splitlines() if ln.strip()]
+                last_line = lines[-1].strip() if lines else "no output"
+                failing = failing + [f"{_NO_RESULTS}: exit {proc.returncode}: {last_line}"]
+        return passed, total, failing
 
     def _run_public_tests(self, temp_task_dir: Path) -> tuple[int, int, list[str]]:
         """Run public sanity tests against the temp dir."""

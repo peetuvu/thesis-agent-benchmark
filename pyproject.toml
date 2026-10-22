@@ -12,8 +12,11 @@ authors = [
     {name = "Peetu Vuorela"},
 ]
 dependencies = [
-    "anthropic>=0.39.0",
-    "openai>=1.50.0",
+    # Pinned below 2.0: SDK 2.x targets API version 2026-10-21, which rejects
+    # temperature (HTTP 400). 1.x targets 2023-06-01, where temperature=0 still
+    # works on the registered Claude 4.x models.
+    "anthropic==1.17.0",
+    "openai==3.36.1",
     "pydantic>=2.0",
     "python-dotenv>=1.0",
 ]

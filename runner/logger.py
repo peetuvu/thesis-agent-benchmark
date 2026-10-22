@@ -7,6 +7,7 @@ import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
@@ -41,6 +42,50 @@ class EvalResults(BaseModel):
     failing_test_names: list[str] = Field(default_factory=list)
 
 
+class LLMCallRecord(BaseModel):
+    """One provider API call as observed by the executor."""
+
+    model: str | None = None  # as reported by the provider (may be a dated snapshot)
+    stop_reason: str | None = None  # provider-native (e.g. 'end_turn', 'stop', 'length')
+    input_tokens: int = 0
+    output_tokens: int = 0
+    request_params: dict[str, Any] = Field(default_factory=dict)
+    usage_details: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None  # set if the call raised instead of returning
+
+
+class SamplingConfig(BaseModel):
+    """Sampling parameters actually sent to the provider API.
+
+    Derived from the per-call request_params. A value of None means the
+    parameter was not sent (provider default applied), or that calls in the
+    run disagreed — in which case consistent_across_calls is False and
+    llm_calls holds the per-call values.
+    """
+
+    temperature: float | None = None
+    max_output_tokens: int | None = None
+    seed: int | None = None
+    reasoning_effort: str | None = None
+    thinking_budget_tokens: int | None = None
+    consistent_across_calls: bool = True
+
+    @classmethod
+    def from_calls(cls, calls: list[LLMCallRecord]) -> SamplingConfig:
+        """Collapse per-call request params into a run-level summary."""
+        params = [c.request_params for c in calls if c.request_params]
+        values: dict[str, Any] = {}
+        consistent = True
+        for key in ("temperature", "max_output_tokens", "seed",
+                    "reasoning_effort", "thinking_budget_tokens"):
+            distinct = {repr(p.get(key)) for p in params}
+            if len(distinct) == 1:
+                values[key] = params[0].get(key)
+            elif len(distinct) > 1:
+                consistent = False
+        return cls(**values, consistent_across_calls=consistent)
+
+
 class RunLog(BaseModel):
     """Complete record of a single benchmark run (STAGES.md D1 schema)."""
 
@@ -56,8 +101,10 @@ class RunLog(BaseModel):
     provider: str
 
     budget_config: BudgetConfig
+    sampling: SamplingConfig = Field(default_factory=SamplingConfig)
     actual_metrics: ActualMetrics
     test_results: EvalResults
+    llm_calls: list[LLMCallRecord] = Field(default_factory=list)
 
     status: str  # matches RunStatus enum values
     policy_compliant: bool | None = None
@@ -81,6 +128,11 @@ def get_git_info() -> tuple[str | None, str | None]:
         return commit_hash, branch_name
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None, None
+
+
+def _fmt_param(value: Any) -> str:
+    """Render a sampling parameter, making 'not sent' explicit."""
+    return "not sent" if value is None else str(value)
 
 
 def _render_markdown(log: RunLog) -> str:
@@ -126,6 +178,36 @@ def _render_markdown(log: RunLog) -> str:
         f"| Wall clock (s) | {am.wall_clock_seconds:.1f} | {bc.max_wall_clock_seconds:.1f} |",
         f"| Est. cost (USD) | ${am.estimated_cost_usd:.4f} | — |",
         "",
+        "## Sampling (as sent to API)",
+        "",
+        f"| Parameter | Value |",
+        f"|-----------|-------|",
+        f"| Temperature | {_fmt_param(log.sampling.temperature)} |",
+        f"| Max output tokens / call | {_fmt_param(log.sampling.max_output_tokens)} |",
+        f"| Seed | {_fmt_param(log.sampling.seed)} |",
+        f"| Reasoning effort | {_fmt_param(log.sampling.reasoning_effort)} |",
+        f"| Thinking budget tokens | {_fmt_param(log.sampling.thinking_budget_tokens)} |",
+        "",
+    ])
+
+    if not log.sampling.consistent_across_calls:
+        lines.extend(["*Parameters differed between calls; see llm_calls in the JSON log.*", ""])
+
+    if log.llm_calls:
+        lines.extend([
+            "## LLM calls",
+            "",
+            "| # | Model | Stop reason | In | Out |",
+            "|---|-------|-------------|----|-----|",
+        ])
+        for i, call in enumerate(log.llm_calls, 1):
+            stop = call.stop_reason if call.error is None else f"error: {call.error}"
+            lines.append(
+                f"| {i} | {call.model} | {stop} | {call.input_tokens} | {call.output_tokens} |"
+            )
+        lines.append("")
+
+    lines.extend([
         "## Policy",
         "",
         f"**Compliant:** {log.policy_compliant}  ",

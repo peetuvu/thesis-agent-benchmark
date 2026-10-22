@@ -286,3 +286,336 @@ class TestGitInfo:
         assert commit is not None
         assert len(commit) == 40  # full SHA
         assert branch is not None
+
+
+# ---------------------------------------------------------------------------
+# Sampling config + LLM call logging
+# ---------------------------------------------------------------------------
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from architectures.base import RunMetrics, RunResult, RunStatus
+from providers.base import LLMProvider, LLMResponse, ProviderError
+from runner.executor import (
+    _COLLECTION_ERROR,
+    _NO_RESULTS,
+    Executor,
+    _derive_outcome,
+    _RecordingProvider,
+)
+from runner.logger import LLMCallRecord, SamplingConfig
+
+
+def _run_async(coro):
+    """Run a coroutine on a private loop without touching the global event loop.
+
+    (asyncio.run() unsets the current loop, which breaks the older tests that
+    use asyncio.get_event_loop().)
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _call(stop_reason: str = "end_turn", **params: object) -> LLMCallRecord:
+    request_params = {
+        "temperature": 0.0, "max_output_tokens": 16384, "seed": None,
+        "reasoning_effort": None, "thinking_budget_tokens": None,
+    }
+    request_params.update(params)
+    return LLMCallRecord(model="m", stop_reason=stop_reason, request_params=request_params)
+
+
+class TestSamplingConfig:
+    def test_from_single_call(self) -> None:
+        cfg = SamplingConfig.from_calls([_call(temperature=0.0, reasoning_effort="none")])
+        assert cfg.temperature == 0.0
+        assert cfg.reasoning_effort == "none"
+        assert cfg.max_output_tokens == 16384
+        assert cfg.consistent_across_calls
+
+    def test_consistent_calls_collapse(self) -> None:
+        cfg = SamplingConfig.from_calls([_call(), _call(), _call()])
+        assert cfg.temperature == 0.0
+        assert cfg.consistent_across_calls
+
+    def test_inconsistent_calls_flagged(self) -> None:
+        cfg = SamplingConfig.from_calls([_call(temperature=0.0), _call(temperature=1.0)])
+        assert cfg.temperature is None
+        assert not cfg.consistent_across_calls
+        assert cfg.max_output_tokens == 16384  # other keys still agree
+
+    def test_temperature_not_sent_stays_none(self) -> None:
+        cfg = SamplingConfig.from_calls([_call(temperature=None, reasoning_effort="medium")])
+        assert cfg.temperature is None
+        assert cfg.consistent_across_calls
+
+    def test_no_calls(self) -> None:
+        cfg = SamplingConfig.from_calls([])
+        assert cfg.temperature is None
+        assert cfg.consistent_across_calls
+
+    def test_failed_calls_ignored(self) -> None:
+        failed = LLMCallRecord(model="m", error="boom")
+        cfg = SamplingConfig.from_calls([failed, _call(temperature=0.0)])
+        assert cfg.temperature == 0.0
+        assert cfg.consistent_across_calls
+
+
+class TestRunLogSampling:
+    def test_temperature_in_json(self) -> None:
+        calls = [_call(temperature=0.0)]
+        log = _make_run_log(sampling=SamplingConfig.from_calls(calls), llm_calls=calls)
+        data = json.loads(log.model_dump_json())
+        assert data["sampling"]["temperature"] == 0.0
+        assert data["llm_calls"][0]["stop_reason"] == "end_turn"
+        assert data["llm_calls"][0]["request_params"]["temperature"] == 0.0
+
+    def test_old_logs_without_sampling_still_load(self) -> None:
+        data = json.loads(_make_run_log().model_dump_json())
+        del data["sampling"], data["llm_calls"]
+        restored = RunLog.model_validate(data)
+        assert restored.sampling.temperature is None
+        assert restored.llm_calls == []
+
+    def test_markdown_shows_sampling(self, tmp_path: Path) -> None:
+        calls = [_call(temperature=0.0, reasoning_effort="none")]
+        log = _make_run_log(sampling=SamplingConfig.from_calls(calls), llm_calls=calls)
+        _, md_path = save_run_log(log, tmp_path)
+        md = md_path.read_text()
+        assert "| Temperature | 0.0 |" in md
+        assert "| Reasoning effort | none |" in md
+        assert "| Seed | not sent |" in md
+        assert "## LLM calls" in md
+
+
+class _FakeProvider(LLMProvider):
+    def __init__(self, response: LLMResponse | None = None, error: str | None = None) -> None:
+        self._response = response
+        self._error = error
+
+    @property
+    def name(self) -> str:
+        return "fake"
+
+    async def complete(self, model, system_prompt, user_prompt, max_tokens=4096,
+                       temperature=0.0, seed=None, thinking_enabled=False) -> LLMResponse:
+        if self._error:
+            raise ProviderError("fake", self._error)
+        return self._response
+
+
+class TestRecordingProvider:
+    def test_records_successful_call(self) -> None:
+        response = LLMResponse(
+            text="x", input_tokens=3, output_tokens=2, model="m-snap", stop_reason="stop",
+            request_params={"temperature": 0.0}, usage_details={"reasoning_tokens": 0},
+        )
+        rec = _RecordingProvider(_FakeProvider(response))
+        out = _run_async(rec.complete(model="m", system_prompt="s", user_prompt="u"))
+        assert out is response
+        assert rec.name == "fake"
+        assert len(rec.calls) == 1
+        call = rec.calls[0]
+        assert (call.model, call.stop_reason, call.input_tokens, call.output_tokens) == (
+            "m-snap", "stop", 3, 2,
+        )
+        assert call.request_params == {"temperature": 0.0}
+        assert call.usage_details == {"reasoning_tokens": 0}
+
+    def test_records_and_reraises_provider_error(self) -> None:
+        rec = _RecordingProvider(_FakeProvider(error="rate limited"))
+        with pytest.raises(ProviderError):
+            _run_async(rec.complete(model="m", system_prompt="s", user_prompt="u"))
+        assert len(rec.calls) == 1
+        assert "rate limited" in rec.calls[0].error
+
+
+def _result(status: RunStatus = RunStatus.SUCCESS, files: dict | None = None,
+            error: str | None = None) -> RunResult:
+    return RunResult(
+        status=status, metrics=RunMetrics(),
+        modified_files={"snake/game.py": "x"} if files is None else files,
+        error_message=error,
+    )
+
+
+_ALLOWED = ["snake/game.py"]
+
+
+class TestDeriveOutcome:
+    def test_full_pass_is_success(self) -> None:
+        status, reason = _derive_outcome(_result(), 15, 15, [], _ALLOWED, [_call()])
+        assert (status, reason) == ("success", None)
+
+    def test_partial_pass_is_failure(self) -> None:
+        status, reason = _derive_outcome(_result(), 10, 15, ["t"], _ALLOWED, [_call()])
+        assert status == "failure"
+        assert reason is None
+
+    def test_collection_error_is_failure_not_success(self) -> None:
+        status, reason = _derive_outcome(
+            _result(), 0, 0, [_COLLECTION_ERROR], _ALLOWED, [_call()],
+        )
+        assert status == "failure"
+        assert "syntax or import error" in reason
+
+    def test_no_results_is_error_not_success(self) -> None:
+        status, reason = _derive_outcome(
+            _result(), 0, 0, [f"{_NO_RESULTS}: exit 1: No module named pytest"],
+            _ALLOWED, [_call()],
+        )
+        assert status == "error"
+        assert "No module named pytest" in reason
+
+    def test_wrong_file_label_explained(self) -> None:
+        status, reason = _derive_outcome(
+            _result(files={"game.py": "x"}), 0, 15, ["t"] * 15, _ALLOWED, [_call()],
+        )
+        assert status == "failure"
+        assert "none target an editable file" in reason
+        assert "game.py" in reason
+
+    def test_truncation_appended_to_no_blocks_message(self) -> None:
+        status, reason = _derive_outcome(
+            _result(RunStatus.FAILURE, files={}, error="No labeled code blocks found in LLM response"),
+            0, 15, ["t"] * 15, _ALLOWED, [_call(stop_reason="length")],
+        )
+        assert status == "failure"
+        assert reason.startswith("No labeled code blocks found")
+        assert "output token cap (stop_reason=length)" in reason
+
+    def test_anthropic_truncation_detected(self) -> None:
+        _, reason = _derive_outcome(
+            _result(RunStatus.FAILURE, files={}, error="No labeled code blocks found"),
+            0, 15, [], _ALLOWED, [_call(stop_reason="max_tokens")],
+        )
+        assert "stop_reason=max_tokens" in reason
+
+    def test_refusal_surfaced(self) -> None:
+        _, reason = _derive_outcome(
+            _result(RunStatus.FAILURE, files={}, error="No labeled code blocks found"),
+            0, 15, [], _ALLOWED, [_call(stop_reason="refusal")],
+        )
+        assert "stop_reason=refusal" in reason
+
+    def test_architecture_error_preserved(self) -> None:
+        status, reason = _derive_outcome(
+            _result(RunStatus.ERROR, files={}, error="[openai] API error: boom"),
+            0, 0, [_NO_RESULTS], _ALLOWED, [LLMCallRecord(model="m", error="boom")],
+        )
+        assert status == "error"
+        assert reason == "[openai] API error: boom"
+
+
+class TestHiddenEvalNoResults:
+    def _executor_with_eval_script(self, tmp_path: Path, script: str) -> Executor:
+        (tmp_path / "eval").mkdir()
+        (tmp_path / "eval" / "run_eval.sh").write_text(script)
+        return Executor(repo_root=tmp_path)
+
+    def test_collection_error_detected(self, tmp_path: Path) -> None:
+        ex = self._executor_with_eval_script(
+            tmp_path,
+            'echo "ERROR test_hidden.py"\n'
+            'echo "!!!! Interrupted: 1 error during collection !!!!"\nexit 2\n',
+        )
+        assert ex._run_hidden_eval("snake", tmp_path) == (0, 0, [_COLLECTION_ERROR])
+
+    def test_missing_pytest_detected(self, tmp_path: Path) -> None:
+        ex = self._executor_with_eval_script(
+            tmp_path, 'echo "/x/.venv/bin/python: No module named pytest" >&2\nexit 1\n',
+        )
+        passed, total, failing = ex._run_hidden_eval("snake", tmp_path)
+        assert (passed, total) == (0, 0)
+        assert failing == [f"{_NO_RESULTS}: exit 1: /x/.venv/bin/python: No module named pytest"]
+
+    def test_normal_output_unchanged(self, tmp_path: Path) -> None:
+        ex = self._executor_with_eval_script(
+            tmp_path,
+            'echo "test_hidden.py::test_a PASSED"\necho "test_hidden.py::test_b FAILED"\n',
+        )
+        assert ex._run_hidden_eval("snake", tmp_path) == (1, 2, ["test_hidden.py::test_b"])
+
+
+class TestExecutorEndToEndOpenAI:
+    """Full executor run with the real OpenAIProvider and SingleAgent.
+
+    Only the OpenAI HTTP call and the pytest subprocesses are mocked.
+    """
+
+    def _run(self, tmp_path: Path, content: str, finish_reason: str = "stop",
+             hidden: tuple = (15, 15, [])) -> RunLog:
+        from architectures.single_agent import SingleAgent
+        from providers.openai import OpenAIProvider
+
+        usage = SimpleNamespace(
+            prompt_tokens=1500, completion_tokens=900,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
+            prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+        )
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content, refusal=None),
+                finish_reason=finish_reason,
+            )],
+            usage=usage,
+            model="gpt-5.6-terra",
+        )
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            provider = OpenAIProvider()
+        provider._client.chat.completions.create = AsyncMock(return_value=response)
+
+        executor = Executor()
+        executor.runs_dir = tmp_path
+        config = RunConfig(
+            task_name="snake", architecture_name="single_agent",
+            model="gpt-5.6-terra", provider="openai",
+        )
+        with patch("runner.executor.get_provider", return_value=provider), \
+             patch.object(Executor, "_run_hidden_eval", return_value=hidden), \
+             patch.object(Executor, "_run_public_tests", return_value=(3, 3, [])):
+            return _run_async(executor.run(config, SingleAgent()))
+
+    def test_success_logs_sampling_and_calls(self, tmp_path: Path) -> None:
+        log = self._run(tmp_path, "```snake/game.py\nclass SnakeGame:\n    pass\n```\n")
+        assert log.status == "success"
+        assert log.sampling.temperature == 0.0
+        assert log.sampling.reasoning_effort == "none"
+        assert log.sampling.max_output_tokens == 16384
+        assert len(log.llm_calls) == 1
+        assert log.llm_calls[0].stop_reason == "stop"
+        assert log.actual_metrics.tokens_prompt == 1500
+        assert log.actual_metrics.tokens_completion == 900
+        assert log.policy_compliant is True
+        saved = json.loads(next(tmp_path.glob("*.json")).read_text())
+        assert saved["sampling"]["temperature"] == 0.0
+
+    def test_truncated_response_explained_in_log(self, tmp_path: Path) -> None:
+        log = self._run(
+            tmp_path, "```snake/game.py\nclass SnakeGame:\n    def move(self):\n",
+            finish_reason="length", hidden=(0, 15, ["t"] * 15),
+        )
+        assert log.status == "failure"
+        assert "No labeled code blocks found" in log.stop_reason
+        assert "stop_reason=length" in log.stop_reason
+
+    def test_unlabeled_block_explained_in_log(self, tmp_path: Path) -> None:
+        log = self._run(
+            tmp_path, "```python\nclass SnakeGame:\n    pass\n```\n",
+            hidden=(0, 15, ["t"] * 15),
+        )
+        assert log.status == "failure"
+        assert "No labeled code blocks found" in log.stop_reason
+
+    def test_broken_code_not_logged_as_success(self, tmp_path: Path) -> None:
+        log = self._run(
+            tmp_path, "```snake/game.py\ndef broken(:\n```\n",
+            hidden=(0, 0, [_COLLECTION_ERROR]),
+        )
+        assert log.status == "failure"
+        assert "syntax or import error" in log.stop_reason

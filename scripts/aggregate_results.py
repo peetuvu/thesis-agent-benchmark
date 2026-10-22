@@ -32,6 +32,11 @@ def load_runs(task_filter=None):
     return runs
 
 
+def _rate(passed, total):
+    # 0/0 on a non-error run means the code failed to import: score it as 0.
+    return passed / total if total else 0.0
+
+
 def summarize(runs):
     groups = defaultdict(list)
     for r in runs:
@@ -41,11 +46,11 @@ def summarize(runs):
     rows = []
     for (arch, model, regime), group in sorted(groups.items()):
         hidden_rates = [
-            g["test_results"]["hidden_passed"] / g["test_results"]["hidden_total"]
+            _rate(g["test_results"]["hidden_passed"], g["test_results"]["hidden_total"])
             for g in group
         ]
         public_rates = [
-            g["test_results"]["public_passed"] / g["test_results"]["public_total"]
+            _rate(g["test_results"]["public_passed"], g["test_results"]["public_total"])
             for g in group
         ]
         tokens = [g["actual_metrics"]["tokens_total"] for g in group]
