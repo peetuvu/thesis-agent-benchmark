@@ -73,7 +73,7 @@ thesis-agents/
 ├── runs/                      # RUN LOGS — structured JSON + markdown per run
 │   └── .gitkeep
 │
-└── tests/                     # Harness tests (257 passing)
+└── tests/                     # Harness tests (349 passing)
     └── test_harness.py
 ```
 
@@ -142,7 +142,7 @@ thesis-agents/
 - `bash eval/run_eval.sh snake /path/to/temp/dir` — run eval against temp dir
 - `bench models` — list registered models (current lineup + legacy aliases)
 - `bench run --task snake --arch single_agent --model opus-5.5 --reasoning-effort low` — run benchmark (provider auto-detected from the registry)
-- `pytest` — run all harness tests (257 passing)
+- `pytest` — run all harness tests (349 passing)
 
 ## Models and reasoning effort
 - Registry: providers/models.py. Current lineup (fast/mid/flagship):

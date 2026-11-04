@@ -14,6 +14,11 @@ NORMAL_STOP_REASONS: frozenset[str] = frozenset({"end_turn", "stop_sequence", "s
 # Provider-native stop reasons meaning "output was cut off at the token cap".
 TRUNCATION_STOP_REASONS: frozenset[str] = frozenset({"max_tokens", "length"})
 
+# Per-request SDK timeout (seconds), identical for every provider and every
+# architecture. Kept below the default run wall clock (runner.config) so a
+# single slow response cannot by itself consume the whole run budget.
+REQUEST_TIMEOUT_SECONDS: float = 600.0
+
 
 @dataclass
 class LLMResponse:

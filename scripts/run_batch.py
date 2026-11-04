@@ -15,6 +15,8 @@ Usage (current lineup; `bench models` lists every alias):
     --archs single_agent sequential \
     --regimes minimal production \
     --reps 3 \
+    --max-output-tokens 32000 \
+    --max-wall-clock 1200 \
     --dry-run
 
 The provider is auto-detected per model from the registry, so one batch can
@@ -94,6 +96,14 @@ def main() -> int:
         help="Reasoning effort passed to every run (e.g. low)",
     )
     parser.add_argument(
+        "--max-output-tokens", type=int, default=None,
+        help="Per-call output token cap passed to every run (default: bench's default)",
+    )
+    parser.add_argument(
+        "--max-wall-clock", type=float, default=None,
+        help="Wall-clock limit in seconds passed to every run (default: bench's default)",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="Print planned runs without executing"
     )
     args = parser.parse_args()
@@ -134,6 +144,10 @@ def main() -> int:
             cmd += ["--provider", args.provider]
         if args.reasoning_effort:
             cmd += ["--reasoning-effort", args.reasoning_effort]
+        if args.max_output_tokens is not None:
+            cmd += ["--max-output-tokens", str(args.max_output_tokens)]
+        if args.max_wall_clock is not None:
+            cmd += ["--max-wall-clock", str(args.max_wall_clock)]
 
         outcome = {
             **r,
@@ -206,6 +220,8 @@ def main() -> int:
         "errors": n_errors,
         "provider": args.provider,
         "reasoning_effort": args.reasoning_effort,
+        "max_output_tokens": args.max_output_tokens,
+        "max_wall_clock": args.max_wall_clock,
         "reps": args.reps,
         "outcomes": outcomes,
     }

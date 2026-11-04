@@ -11,6 +11,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from providers.models import check_reasoning_effort
 
+DEFAULT_MAX_WALL_CLOCK_SECONDS: float = 1200.0
+"""Default per-run wall-clock limit, identical for every architecture."""
+
 
 def _generate_run_id() -> str:
     return str(uuid.uuid4())
@@ -44,7 +47,7 @@ class RunConfig(BaseModel):
     """Per-call output token cap, sent unchanged on every LLM call by every architecture."""
     max_tool_calls: int = 10
     """Recorded in the run log only; no architecture reads it."""
-    max_wall_clock_seconds: float = 300.0
+    max_wall_clock_seconds: float = DEFAULT_MAX_WALL_CLOCK_SECONDS
     seed: int | None = None
     thinking_enabled: bool = False
     reasoning_effort: str | None = None

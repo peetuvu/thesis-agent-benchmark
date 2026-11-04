@@ -35,7 +35,7 @@ class TestRunConfig:
         assert cfg.prompt_regime == "minimal"
         assert cfg.max_tokens == 100_000
         assert cfg.max_tool_calls == 10
-        assert cfg.max_wall_clock_seconds == 300.0
+        assert cfg.max_wall_clock_seconds == 1200.0
         assert cfg.seed is None
 
     def test_auto_fields(self) -> None:

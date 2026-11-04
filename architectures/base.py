@@ -67,7 +67,7 @@ class TaskContext:
     max_tool_calls: int = 50
     """Maximum number of tool/API calls allowed."""
 
-    timeout_seconds: float = 300.0
+    timeout_seconds: float = 1200.0
     """Wall-clock time limit for the run."""
 
     model: str = "claude-sonnet-4-6"

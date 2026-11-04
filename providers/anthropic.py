@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from providers.base import LLMProvider, LLMResponse, ProviderError
+from providers.base import REQUEST_TIMEOUT_SECONDS, LLMProvider, LLMResponse, ProviderError
 from providers.models import check_reasoning_effort
 
 
@@ -80,7 +80,7 @@ class AnthropicProvider(LLMProvider):
                 max_tokens=api_max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                timeout=anthropic.Timeout(300.0, connect=5.0),
+                timeout=anthropic.Timeout(REQUEST_TIMEOUT_SECONDS, connect=5.0),
             )
 
             if reasoning_effort is not None:

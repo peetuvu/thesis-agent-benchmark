@@ -12,7 +12,7 @@ from architectures.base import Architecture
 from pydantic import ValidationError
 
 from providers.models import REASONING_EFFORTS, list_models, resolve_model
-from runner.config import RunConfig
+from runner.config import DEFAULT_MAX_WALL_CLOCK_SECONDS, RunConfig
 from runner.executor import Executor
 
 from dotenv import load_dotenv
@@ -63,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--max-tokens", type=int, default=100_000, help="Total token budget (recorded only, not enforced)")
     run_parser.add_argument("--max-output-tokens", type=int, default=32_000, help="Per-call output token cap, identical for every call (default: 32000)")
     run_parser.add_argument("--max-tool-calls", type=int, default=10, help="Max tool/API calls (recorded only, not enforced)")
-    run_parser.add_argument("--max-wall-clock", type=float, default=300.0, help="Wall-clock timeout (seconds)")
+    run_parser.add_argument("--max-wall-clock", type=float, default=DEFAULT_MAX_WALL_CLOCK_SECONDS, help="Wall-clock timeout in seconds (default: 1200)")
     run_parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     run_parser.add_argument("--thinking", action="store_true", help="Enable extended thinking / reasoning mode (legacy models)")
     run_parser.add_argument(

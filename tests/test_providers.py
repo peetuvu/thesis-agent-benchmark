@@ -625,3 +625,26 @@ class TestOpenAIReasoningEffort:
         with pytest.raises(ProviderError, match=match):
             _run_async(provider.complete(system_prompt="s", user_prompt="u", **kwargs))
         provider._client.chat.completions.create.assert_not_called()
+
+
+class TestRequestTimeout:
+    """Both providers send the same shared per-request SDK timeout."""
+
+    def test_constant_is_600_and_below_default_wall_clock(self) -> None:
+        from providers.base import REQUEST_TIMEOUT_SECONDS
+        from runner.config import DEFAULT_MAX_WALL_CLOCK_SECONDS, RunConfig
+
+        assert REQUEST_TIMEOUT_SECONDS == 600.0
+        assert DEFAULT_MAX_WALL_CLOCK_SECONDS == 1200.0
+        assert RunConfig(task_name="t", architecture_name="a").max_wall_clock_seconds == 1200.0
+
+    def test_anthropic_sends_600s_timeout(self) -> None:
+        _, sent = _anthropic_call(model="claude-opus-5-5", reasoning_effort="low")
+        assert sent["timeout"].read == 600.0
+        assert sent["timeout"].connect == 5.0
+
+    def test_openai_sends_600s_timeout(self) -> None:
+        _, sent = _openai_call(
+            _openai_response(model="gpt-6-luna"), model="gpt-6-luna", reasoning_effort="low",
+        )
+        assert sent["timeout"] == 600.0

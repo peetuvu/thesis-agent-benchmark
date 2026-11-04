@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from providers.base import LLMProvider, LLMResponse, ProviderError
+from providers.base import REQUEST_TIMEOUT_SECONDS, LLMProvider, LLMResponse, ProviderError
 from providers.models import check_reasoning_effort, get_model_by_api_string
 
 # Effort used when thinking_enabled=True (OpenAI's default effort level).
@@ -101,7 +101,7 @@ class OpenAIProvider(LLMProvider):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            timeout=300.0,
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         if sent_temperature is not None:
             kwargs["temperature"] = sent_temperature
