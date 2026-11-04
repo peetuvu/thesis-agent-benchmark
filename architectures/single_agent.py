@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from architectures.base import Architecture, RunMetrics, RunResult, RunStatus, TaskContext
-from architectures.utils import format_source_files, parse_code_blocks
+from architectures.utils import (  # noqa: F401 (format_source_files re-exported)
+    format_source_files,
+    parse_code_blocks,
+    render_prompt_template,
+)
 from providers.base import ProviderError
 
 _SYSTEM_PROMPT = "You are a programming assistant."
@@ -33,8 +37,16 @@ class SingleAgent(Architecture):
                 error_message="No provider configured in TaskContext",
             )
 
-        # 1. Format the prompt
-        prompt = self._format_prompt(ctx)
+        # 1. Format the prompt (a bad template fails here, before any API call)
+        try:
+            prompt = self._format_prompt(ctx)
+        except ValueError as e:
+            return RunResult(
+                status=RunStatus.ERROR,
+                metrics=RunMetrics(),
+                modified_files={},
+                error_message=f"Prompt template error: {e}",
+            )
 
         # 2. Make ONE LLM call
         try:
@@ -42,7 +54,7 @@ class SingleAgent(Architecture):
                 model=ctx.model,
                 system_prompt=_SYSTEM_PROMPT,
                 user_prompt=prompt,
-                max_tokens=ctx.max_tokens,
+                max_tokens=ctx.max_output_tokens,
                 temperature=0.0,
                 seed=ctx.seed,
                 thinking_enabled=ctx.thinking_enabled,
@@ -91,16 +103,5 @@ class SingleAgent(Architecture):
         )
 
     def _format_prompt(self, ctx: TaskContext) -> str:
-        """Fill placeholders in the prompt template."""
-        source_files_str = format_source_files(ctx.source_files)
-        editable_files_str = "\n".join(
-            f"- {path}" for path in ctx.source_files.keys()
-        )
-        test_cmd = "python -m pytest tests/ -v"
-
-        return ctx.prompt_template.format(
-            task_spec=ctx.task_spec,
-            source_files=source_files_str,
-            editable_files=editable_files_str,
-            test_cmd=test_cmd,
-        )
+        """Render the prompt template (see architectures.utils.render_prompt_template)."""
+        return render_prompt_template(ctx)

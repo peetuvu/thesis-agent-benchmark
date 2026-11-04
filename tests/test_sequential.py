@@ -32,7 +32,7 @@ def _make_context(**overrides: object) -> TaskContext:
             "snake/game.py": "# stub\nclass SnakeGame:\n    pass\n",
         },
         prompt_regime="minimal",
-        prompt_template="",
+        prompt_template="REGIME TEMPLATE\nTask: {task_spec}\nFiles:\n{source_files}\n",
         model="test-model",
         max_tokens=40_000,
     )
@@ -266,14 +266,24 @@ class TestModifiedFiles:
         assert result.status == RunStatus.SUCCESS
 
 
-class TestTokenBudgetSplit:
-    def test_per_step_max_tokens(self) -> None:
+class TestPerCallOutputCap:
+    def test_every_step_uses_max_output_tokens(self) -> None:
+        """All four calls get ctx.max_output_tokens; the total budget is not split."""
         provider = _four_step_provider()
-        ctx = _make_context(provider=provider, max_tokens=40_000)
+        ctx = _make_context(provider=provider, max_tokens=40_000, max_output_tokens=12_345)
         _run(ctx)
 
+        assert provider.complete.call_count == 4
         for call in provider.complete.call_args_list:
-            assert call.kwargs["max_tokens"] == 10_000
+            assert call.kwargs["max_tokens"] == 12_345
+
+    def test_total_budget_does_not_affect_per_call_cap(self) -> None:
+        caps = []
+        for budget in (8, 100_000):
+            provider = _four_step_provider()
+            _run(_make_context(provider=provider, max_tokens=budget))
+            caps.append({c.kwargs["max_tokens"] for c in provider.complete.call_args_list})
+        assert caps == [{32_000}, {32_000}]
 
 
 class TestStepModels:

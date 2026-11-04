@@ -21,6 +21,9 @@ class RunStatus(Enum):
     ERROR = "error"
     TIMEOUT = "timeout"
     BUDGET_EXCEEDED = "budget_exceeded"
+    POLICY_VIOLATION = "policy_violation"
+    """Set by the executor (never by an architecture) when the sandbox policy
+    check found violations; overrides whatever status the run would have had."""
 
 
 @dataclass
@@ -37,7 +40,13 @@ class TaskContext:
     """Contents of the task README / specification."""
 
     source_files: dict[str, str]
-    """Mapping of relative path -> file contents for editable source files."""
+    """Mapping of relative path -> file contents for every .py file in the
+    task's source package (including __init__.py), shown to the model."""
+
+    editable_files: list[str] = field(default_factory=list)
+    """Paths the model may edit (TaskPaths.allowed_edit_files: the source
+    package's .py files except __init__.py). Empty means "derive from
+    source_files" (see architectures.utils.resolve_editable_files)."""
 
     public_tests_dir: Path | None = None
     """Path to public sanity tests the agent is allowed to run."""
@@ -49,7 +58,11 @@ class TaskContext:
     """Resolved prompt template contents."""
 
     max_tokens: int = 100_000
-    """Total token budget for this run."""
+    """Total token budget for this run. Recorded as a ceiling only: nothing
+    in the harness stops a run that exceeds it."""
+
+    max_output_tokens: int = 32_000
+    """Per-call output token cap, sent unchanged on every LLM call."""
 
     max_tool_calls: int = 50
     """Maximum number of tool/API calls allowed."""
@@ -132,7 +145,9 @@ class Architecture(ABC):
         """Execute this architecture on a task and return the result.
 
         Implementations must:
-        - Respect ctx.max_tokens, ctx.max_tool_calls, and ctx.timeout_seconds
+        - Pass ctx.max_output_tokens as max_tokens on every provider call
+          (ctx.max_tokens and ctx.max_tool_calls are recorded ceilings that the
+          harness does not enforce; the executor enforces ctx.timeout_seconds)
         - Populate RunResult.metrics accurately
         - Return modified_files with the final state of all edited source files
         - Catch and report errors rather than raising (set status=ERROR)
@@ -140,7 +155,9 @@ class Architecture(ABC):
         ...
 
     async def run_timed(self, ctx: TaskContext) -> RunResult:
-        """Wrapper around `run` that enforces wall-clock timing.
+        """Wrapper around `run` that measures wall-clock time.
+
+        The timeout itself is enforced by the executor (asyncio.wait_for).
 
         Subclasses should generally not override this — override `run` instead.
         """

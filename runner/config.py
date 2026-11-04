@@ -39,7 +39,11 @@ class RunConfig(BaseModel):
     provider: str = "anthropic"
     prompt_regime: str = "minimal"
     max_tokens: int = 100_000
+    """Total token budget. Recorded in the run log as a ceiling only; not enforced."""
+    max_output_tokens: int = Field(default=32_000, gt=0)
+    """Per-call output token cap, sent unchanged on every LLM call by every architecture."""
     max_tool_calls: int = 10
+    """Recorded in the run log only; no architecture reads it."""
     max_wall_clock_seconds: float = 300.0
     seed: int | None = None
     thinking_enabled: bool = False

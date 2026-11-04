@@ -1,6 +1,8 @@
 # Production Prompt Template
 # Derived from 143 production agent conversations at Kimara.ai (Jan–Mar 2026)
-# Placeholders: {task_spec}, {source_files}, {editable_files}, {test_cmd}
+# Placeholders: {task_spec}, {source_files}, {editable_files}, {test_cmd}, {example_file}
+# These leading "# " lines are a header: architectures.utils.strip_template_header
+# removes them, so they are never sent to the model.
 # The template replicates the average implementer prompt style from the company:
 # role preamble, task specification, source context, execution steps, constraints,
 # self-review checklist, and structured output format.
@@ -56,7 +58,7 @@ When done, return the **complete contents** of every file you modified as labele
 
 Example:
 
-```snake/game.py
+```{example_file}
 # complete file contents here
 ...
 ```

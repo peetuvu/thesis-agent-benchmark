@@ -8,11 +8,6 @@ from typing import Any
 from providers.base import LLMProvider, LLMResponse, ProviderError
 from providers.models import check_reasoning_effort, get_model_by_api_string
 
-# Same per-call output cap as the Anthropic provider, so the per-call output
-# limit is not a cross-provider confound. Budget enforcement is handled by the
-# executor. For reasoning models, reasoning tokens count inside this cap.
-_MAX_API_TOKENS = 16384
-
 # Effort used when thinking_enabled=True (OpenAI's default effort level).
 _THINKING_EFFORT = "medium"
 
@@ -77,7 +72,9 @@ class OpenAIProvider(LLMProvider):
         """Send a completion request to the OpenAI Chat Completions API.
 
         - Uses max_completion_tokens (max_tokens is deprecated and rejected by
-          reasoning models), capped at _MAX_API_TOKENS like the Anthropic provider.
+          reasoning models), set to max_tokens unchanged: the run's per-call
+          output cap, identical across providers. Reasoning tokens count
+          inside it.
         - reasoning_effort, when given, is validated against the registry and
           sent as-is (required for the GPT-6 entries). Otherwise registered
           reasoning models get their legacy effort (see _reasoning_effort).
@@ -93,7 +90,7 @@ class OpenAIProvider(LLMProvider):
         except ValueError as e:
             raise ProviderError("openai", str(e)) from e
 
-        api_max_tokens = min(max_tokens, _MAX_API_TOKENS)
+        api_max_tokens = max_tokens
         effort = _reasoning_effort(model, thinking_enabled, reasoning_effort)
         sent_temperature = temperature if effort in (None, "none") else None
 

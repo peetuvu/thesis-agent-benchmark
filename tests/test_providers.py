@@ -255,7 +255,6 @@ class TestProviderError:
 
 from types import SimpleNamespace
 
-from providers.openai import _MAX_API_TOKENS as OPENAI_MAX_API_TOKENS
 
 
 def _run_async(coro):
@@ -320,9 +319,11 @@ class TestOpenAIRequest:
         assert sent["max_completion_tokens"] == 1000
         assert "max_tokens" not in sent
 
-    def test_max_tokens_capped_like_anthropic(self) -> None:
-        _, sent = _openai_call(_openai_response(), max_tokens=100_000)
-        assert sent["max_completion_tokens"] == OPENAI_MAX_API_TOKENS == 16384
+    def test_max_tokens_sent_unchanged(self) -> None:
+        """No provider-side clamp: the run's per-call cap reaches the API as-is."""
+        result, sent = _openai_call(_openai_response(), max_tokens=32_000)
+        assert sent["max_completion_tokens"] == 32_000
+        assert result.request_params["max_output_tokens"] == 32_000
 
     def test_messages_have_system_and_user_roles(self) -> None:
         _, sent = _openai_call(_openai_response())
@@ -515,10 +516,11 @@ class TestAnthropicRequestParams:
         assert "seed" not in sent
         assert result.request_params["seed"] is None
 
-    def test_max_output_tokens_recorded_after_cap(self) -> None:
-        result, sent = _anthropic_call(max_tokens=100_000)
-        assert sent["max_tokens"] == 16384
-        assert result.request_params["max_output_tokens"] == 16384
+    def test_max_output_tokens_sent_unchanged(self) -> None:
+        """No provider-side clamp: the run's per-call cap reaches the API as-is."""
+        result, sent = _anthropic_call(max_tokens=32_000)
+        assert sent["max_tokens"] == 32_000
+        assert result.request_params["max_output_tokens"] == 32_000
 
     def test_same_param_keys_as_openai(self) -> None:
         anthropic_result, _ = _anthropic_call()

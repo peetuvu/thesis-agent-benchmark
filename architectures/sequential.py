@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from architectures.base import Architecture, RunMetrics, RunResult, RunStatus, TaskContext
-from architectures.utils import format_source_files, parse_code_blocks
+from architectures.utils import format_source_files, parse_code_blocks, render_prompt_template
 from providers.base import ProviderError
 
 _STEP_CONFIGS = [
@@ -30,20 +30,16 @@ def _build_plan_prompt(task_spec: str, source_files: dict[str, str]) -> str:
     )
 
 
-def _build_implement_prompt(
-    task_spec: str, source_files: dict[str, str], plan: str
-) -> str:
-    """Build the user prompt for the implementation step."""
-    files_str = format_source_files(source_files)
+def _build_implement_prompt(rendered_template: str, plan: str) -> str:
+    """Build the user prompt for the implementation step.
+
+    The selected prompt regime's template, rendered exactly as SingleAgent
+    renders it, followed by the plan from step 1.
+    """
     return (
-        f"## Task specification\n\n{task_spec}\n\n"
-        f"## Current source files\n\n{files_str}\n\n"
-        f"## Implementation plan\n\n{plan}\n\n"
-        "## Your job\n\n"
-        "Implement the solution following the plan above. "
-        "Return your code in labeled markdown blocks like:\n\n"
-        "```path/to/file.py\n<code>\n```\n\n"
-        "Include ALL modified files with their complete contents."
+        f"{rendered_template.rstrip()}\n\n"
+        f"## Implementation plan\n\n"
+        f"Follow this plan, produced in an earlier planning step:\n\n{plan}\n"
     )
 
 
@@ -84,8 +80,11 @@ class SequentialPipeline(Architecture):
     """Fixed 4-step sequential pipeline: plan → implement → review → fix.
 
     Each step is one LLM call. The output of each step feeds into the
-    next step's prompt. The final code comes from the fix step (or the
-    implement step if fix returns no code blocks).
+    next step's prompt. The implement step uses the selected prompt regime's
+    template (as SingleAgent does) with the plan appended; plan, review and
+    fix use fixed prompts. The final files are the implement step's code
+    blocks overlaid with the fix step's: a file the fixer does not return
+    keeps its implemented version.
     """
 
     def __init__(
@@ -116,13 +115,17 @@ class SequentialPipeline(Architecture):
         total_output_tokens = 0
         api_calls = 0
 
-        # Rough even split of token budget across steps — could be made smarter later
-        per_step_tokens = ctx.max_tokens // 4
+        # Render the regime template up front so a bad template fails before
+        # any API call is made.
+        try:
+            rendered_template = render_prompt_template(ctx)
+        except ValueError as e:
+            return self._error_result(f"Prompt template error: {e}", agent_log, 0)
 
         # ---- Step 1: PLAN ----
         plan_prompt = _build_plan_prompt(ctx.task_spec, ctx.source_files)
         plan_text, err = await self._call_step(
-            ctx, _STEP_CONFIGS[0], plan_prompt, per_step_tokens, agent_log
+            ctx, _STEP_CONFIGS[0], plan_prompt, agent_log
         )
         if err is not None:
             return self._error_result(err, agent_log, api_calls + 1)
@@ -131,11 +134,9 @@ class SequentialPipeline(Architecture):
         total_output_tokens += agent_log[-1]["output_tokens"]
 
         # ---- Step 2: IMPLEMENT ----
-        implement_prompt = _build_implement_prompt(
-            ctx.task_spec, ctx.source_files, plan_text
-        )
+        implement_prompt = _build_implement_prompt(rendered_template, plan_text)
         implement_text, err = await self._call_step(
-            ctx, _STEP_CONFIGS[1], implement_prompt, per_step_tokens, agent_log
+            ctx, _STEP_CONFIGS[1], implement_prompt, agent_log
         )
         if err is not None:
             return self._error_result(err, agent_log, api_calls + 1)
@@ -148,7 +149,7 @@ class SequentialPipeline(Architecture):
         # ---- Step 3: REVIEW ----
         review_prompt = _build_review_prompt(ctx.task_spec, implement_text)
         review_text, err = await self._call_step(
-            ctx, _STEP_CONFIGS[2], review_prompt, per_step_tokens, agent_log
+            ctx, _STEP_CONFIGS[2], review_prompt, agent_log
         )
         if err is not None:
             return self._error_result(err, agent_log, api_calls + 1)
@@ -159,7 +160,7 @@ class SequentialPipeline(Architecture):
         # ---- Step 4: FIX ----
         fix_prompt = _build_fix_prompt(ctx.task_spec, implement_text, review_text)
         fix_text, err = await self._call_step(
-            ctx, _STEP_CONFIGS[3], fix_prompt, per_step_tokens, agent_log
+            ctx, _STEP_CONFIGS[3], fix_prompt, agent_log
         )
         if err is not None:
             return self._error_result(err, agent_log, api_calls + 1)
@@ -169,8 +170,9 @@ class SequentialPipeline(Architecture):
 
         fix_code = parse_code_blocks(fix_text)
 
-        # Use fix step's code blocks, fall back to implement step's
-        modified_files = fix_code if fix_code else implement_code
+        # Fix step's files override the implement step's; files the fixer
+        # did not return keep their implemented version.
+        modified_files = {**implement_code, **fix_code}
 
         metrics = RunMetrics(
             input_tokens=total_input_tokens,
@@ -199,7 +201,6 @@ class SequentialPipeline(Architecture):
         ctx: TaskContext,
         step_config: dict,
         user_prompt: str,
-        max_tokens: int,
         agent_log: list[dict],
     ) -> tuple[str, str | None]:
         """Execute a single pipeline step. Returns (response_text, error_or_None)."""
@@ -208,7 +209,7 @@ class SequentialPipeline(Architecture):
                 model=ctx.model,
                 system_prompt=step_config["system"],
                 user_prompt=user_prompt,
-                max_tokens=max_tokens,
+                max_tokens=ctx.max_output_tokens,
                 temperature=0.0,
                 seed=ctx.seed,
                 thinking_enabled=ctx.thinking_enabled,

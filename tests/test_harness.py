@@ -305,7 +305,7 @@ from runner.executor import (
     _derive_outcome,
     _RecordingProvider,
 )
-from runner.logger import LLMCallRecord, SamplingConfig
+from runner.logger import LLMCallRecord, SamplingConfig, is_run_log_file
 
 
 def _run_async(coro):
@@ -588,13 +588,13 @@ class TestExecutorEndToEndOpenAI:
         assert log.status == "success"
         assert log.sampling.temperature == 0.0
         assert log.sampling.reasoning_effort == "none"
-        assert log.sampling.max_output_tokens == 16384
+        assert log.sampling.max_output_tokens == 32_000  # RunConfig default, sent unchanged
         assert len(log.llm_calls) == 1
         assert log.llm_calls[0].stop_reason == "stop"
         assert log.actual_metrics.tokens_prompt == 1500
         assert log.actual_metrics.tokens_completion == 900
         assert log.policy_compliant is True
-        saved = json.loads(next(tmp_path.glob("*.json")).read_text())
+        saved = json.loads(next(f for f in tmp_path.glob("*.json") if is_run_log_file(f)).read_text())
         assert saved["sampling"]["temperature"] == 0.0
 
     def test_truncated_response_explained_in_log(self, tmp_path: Path) -> None:
@@ -768,7 +768,7 @@ class TestExecutorEndToEndAnthropicEffort:
     def test_git_dirty_recorded(self, tmp_path: Path) -> None:
         log = self._run(tmp_path, dirty=True)
         assert log.git_dirty is True
-        saved = json.loads(next(tmp_path.glob("*.json")).read_text())
+        saved = json.loads(next(f for f in tmp_path.glob("*.json") if is_run_log_file(f)).read_text())
         assert saved["git_dirty"] is True
         md = next(tmp_path.glob("*.md")).read_text()
         assert "Uncommitted changes at start: yes" in md

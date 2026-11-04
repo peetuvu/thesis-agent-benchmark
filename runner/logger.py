@@ -14,11 +14,16 @@ from pydantic import BaseModel, Field
 
 
 class BudgetConfig(BaseModel):
-    """Budget limits configured for a run."""
+    """Budget limits configured for a run.
+
+    Only max_wall_clock_seconds and max_output_tokens_per_call take effect;
+    max_tokens and max_tool_calls are recorded ceilings, not enforced.
+    """
 
     max_tokens: int = 100_000
     max_tool_calls: int = 10
     max_wall_clock_seconds: float = 300.0
+    max_output_tokens_per_call: int | None = None  # None in logs written before it existed
 
 
 class ActualMetrics(BaseModel):
@@ -119,6 +124,32 @@ class RunLog(BaseModel):
     policy_compliant: bool | None = None
     stop_reason: str | None = None
     notes: str | None = None
+    artifacts_file: str | None = None
+    """Filename (in the same directory) of the RunArtifacts sidecar holding
+    prompts, responses and generated files; None for older logs."""
+
+
+class CallTranscript(BaseModel):
+    """Prompts and response text of one provider call (index-aligned with RunLog.llm_calls)."""
+
+    system_prompt: str
+    user_prompt: str
+    response_text: str | None = None  # None if the call raised or was cancelled
+    error: str | None = None
+
+
+class RunArtifacts(BaseModel):
+    """Bulky per-run content kept out of the main log: everything the model
+    was sent, everything it returned, and the files that were evaluated."""
+
+    run_id: str
+    calls: list[CallTranscript] = Field(default_factory=list)
+    agent_log: list[dict[str, Any]] = Field(default_factory=list)
+    """RunResult.agent_log as returned by the architecture (e.g. step/role labels)."""
+    modified_files: dict[str, str] = Field(default_factory=dict)
+    """Files exactly as parsed from the model output (including rejected paths)."""
+    evaluated_files: dict[str, str] = Field(default_factory=dict)
+    """Contents of the editable files in the workspace when the tests ran."""
 
 
 def get_git_info() -> tuple[str | None, str | None]:
@@ -200,8 +231,8 @@ def _render_markdown(log: RunLog) -> str:
         f"|--------|-------|--------|",
         f"| Tokens (prompt) | {am.tokens_prompt} | — |",
         f"| Tokens (completion) | {am.tokens_completion} | — |",
-        f"| Tokens (total) | {am.tokens_total} | {bc.max_tokens} |",
-        f"| API calls | {am.api_calls} | {bc.max_tool_calls} |",
+        f"| Tokens (total) | {am.tokens_total} | {bc.max_tokens} (not enforced) |",
+        f"| API calls | {am.api_calls} | {bc.max_tool_calls} (not enforced) |",
         f"| Wall clock (s) | {am.wall_clock_seconds:.1f} | {bc.max_wall_clock_seconds:.1f} |",
         f"| Est. cost (USD) | "
         f"{f'${am.estimated_cost_usd:.4f}' if am.price_source else 'not priced'} | — |",
@@ -247,6 +278,8 @@ def _render_markdown(log: RunLog) -> str:
         lines.append(f"**Stop reason:** {log.stop_reason}  ")
     if log.notes:
         lines.extend(["", "## Notes", "", log.notes])
+    if log.artifacts_file:
+        lines.extend(["", f"**Prompts, responses and files:** `{log.artifacts_file}`"])
     if log.git_commit:
         lines.extend(["", "## Git", "", f"- Commit: `{log.git_commit}`"])
     if log.git_branch:
@@ -287,6 +320,29 @@ def make_run_filename(log: RunLog) -> str:
         f"{ts}_{log.provider}_{model_short}_{log.architecture_name}"
         f"_{log.task_name}_{log.prompt_regime}_{run_id_short}"
     )
+
+
+def artifacts_filename(log: RunLog) -> str:
+    """Sidecar filename for a run's artifacts (next to its JSON log)."""
+    return f"{make_run_filename(log)}.artifacts.json"
+
+
+def is_run_log_file(path: Path) -> bool:
+    """True for a run's main JSON log (not a batch summary or artifacts sidecar)."""
+    name = path.name
+    return (
+        name.endswith(".json")
+        and not name.endswith(".artifacts.json")
+        and not name.startswith("batch_")
+    )
+
+
+def save_run_artifacts(artifacts: RunArtifacts, log: RunLog, runs_dir: Path) -> Path:
+    """Write the artifacts sidecar for *log* and return its path."""
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    path = runs_dir / artifacts_filename(log)
+    path.write_text(json.dumps(artifacts.model_dump(mode="json"), indent=2) + "\n")
+    return path
 
 
 def save_run_log(log: RunLog, runs_dir: Path) -> tuple[Path, Path]:

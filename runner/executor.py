@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from pathlib import Path
 
@@ -26,12 +27,16 @@ from runner.config import RunConfig, TaskPaths
 from runner.logger import (
     ActualMetrics,
     BudgetConfig,
+    CallTranscript,
     EvalResults,
     LLMCallRecord,
+    RunArtifacts,
     RunLog,
     SamplingConfig,
+    artifacts_filename,
     get_git_dirty,
     get_git_info,
+    save_run_artifacts,
     save_run_log,
 )
 from runner.sandbox import check_policy, snapshot_directory
@@ -78,6 +83,8 @@ class _RecordingProvider(LLMProvider):
     def __init__(self, inner: LLMProvider) -> None:
         self._inner = inner
         self.calls: list[LLMCallRecord] = []
+        self.transcript: list[CallTranscript] = []
+        """Prompts and response text per call, index-aligned with calls."""
 
     @property
     def name(self) -> str:
@@ -105,9 +112,25 @@ class _RecordingProvider(LLMProvider):
                 thinking_enabled=thinking_enabled,
                 reasoning_effort=reasoning_effort,
             )
-        except ProviderError as e:
-            self.calls.append(LLMCallRecord(model=model, error=str(e)))
+        except asyncio.CancelledError:
+            # Cancelled by the wall-clock timeout while the request was in
+            # flight: usage is unknown (the provider may still bill it).
+            msg = "cancelled before a response arrived (wall-clock timeout); usage unknown"
+            self.calls.append(LLMCallRecord(model=model, error=msg))
+            self.transcript.append(CallTranscript(
+                system_prompt=system_prompt, user_prompt=user_prompt, error=msg,
+            ))
             raise
+        except Exception as e:  # ProviderError, or anything else the provider raised
+            msg = str(e) if isinstance(e, ProviderError) else f"{type(e).__name__}: {e}"
+            self.calls.append(LLMCallRecord(model=model, error=msg))
+            self.transcript.append(CallTranscript(
+                system_prompt=system_prompt, user_prompt=user_prompt, error=msg,
+            ))
+            raise
+        self.transcript.append(CallTranscript(
+            system_prompt=system_prompt, user_prompt=user_prompt, response_text=response.text,
+        ))
         self.calls.append(LLMCallRecord(
             model=response.model,
             stop_reason=response.stop_reason,
@@ -132,11 +155,15 @@ def _derive_outcome(
     hidden_failing: list[str],
     allowed_edit_files: list[str],
     calls: list[LLMCallRecord],
+    violations: list[str] | None = None,
 ) -> tuple[str, str | None]:
     """Determine the run's final (status, stop_reason).
 
     Guarantees a run never ends as "success" without a positive hidden score,
     and that the stop_reason explains why when the output was unusable.
+    Any sandbox policy violation turns the status into "policy_violation"
+    (whatever it would otherwise have been, which is kept in stop_reason),
+    so a non-compliant run can never count as a success.
     """
     status = result.status.value
     reasons: list[str] = [result.error_message] if result.error_message else []
@@ -179,7 +206,26 @@ def _derive_outcome(
         else:
             reasons.append(f"Last LLM call ended with stop_reason={last.stop_reason}")
 
+    if violations:
+        reasons.append(
+            f"Sandbox policy violated ({len(violations)} violation(s), listed in notes); "
+            f"status would otherwise have been '{status}'"
+        )
+        status = RunStatus.POLICY_VIOLATION.value
+
     return status, "; ".join(reasons) if reasons else None
+
+
+def _metrics_from_calls(calls: list[LLMCallRecord], wall_time_seconds: float) -> RunMetrics:
+    """Metrics reconstructed from the recorded calls, for runs whose
+    architecture never returned (timeout or unhandled exception)."""
+    return RunMetrics(
+        input_tokens=sum(c.input_tokens for c in calls),
+        output_tokens=sum(c.output_tokens for c in calls),
+        api_calls=len(calls),
+        wall_time_seconds=wall_time_seconds,
+        estimated_cost_usd=sum(c.estimated_cost_usd or 0.0 for c in calls),
+    )
 
 
 class Executor:
@@ -221,12 +267,20 @@ class Executor:
             task_pre = snapshot_directory(temp_task_dir)
 
             # --- 4. Run architecture in temp dir ---
-            result, llm_calls = await self._run_architecture(
+            result, llm_calls, transcript = await self._run_architecture(
                 config, paths, temp_task_dir, architecture,
             )
 
-            # --- 5. Write modified files into the temp dir ---
-            self._apply_modified_files(result.modified_files, temp_task_dir)
+            # --- 5. Write modified files into the temp dir (paths that would
+            #        resolve outside it are rejected as policy violations) ---
+            apply_violations = self._apply_modified_files(
+                result.modified_files, temp_task_dir,
+            )
+            evaluated_files = {
+                rel: (temp_task_dir / rel).read_text()
+                for rel in paths.allowed_edit_files
+                if (temp_task_dir / rel).is_file()
+            }
 
             # --- 6. Snapshot temp dir after architecture, check workspace policy ---
             task_post = snapshot_directory(temp_task_dir)
@@ -249,7 +303,7 @@ class Executor:
             eval_ok, eval_violations = check_policy(eval_pre, eval_post, allowed_files=[])
 
             # --- 10. Policy compliance ---
-            all_violations = eval_violations + workspace_violations
+            all_violations = eval_violations + apply_violations + workspace_violations
             policy_compliant = len(all_violations) == 0
 
             # --- 11. Assemble RunLog ---
@@ -258,7 +312,7 @@ class Executor:
 
             status, stop_reason = _derive_outcome(
                 result, hidden_passed, hidden_total, hidden_failing,
-                paths.allowed_edit_files, llm_calls,
+                paths.allowed_edit_files, llm_calls, all_violations,
             )
 
             log = RunLog(
@@ -277,6 +331,7 @@ class Executor:
                     max_tokens=config.max_tokens,
                     max_tool_calls=config.max_tool_calls,
                     max_wall_clock_seconds=config.max_wall_clock_seconds,
+                    max_output_tokens_per_call=config.max_output_tokens,
                 ),
                 sampling=SamplingConfig.from_calls(llm_calls),
                 actual_metrics=ActualMetrics(
@@ -304,6 +359,19 @@ class Executor:
                 notes="; ".join(all_violations) if all_violations else None,
             )
 
+            # --- 12. Save prompts/responses/files sidecar, then the log ---
+            log.artifacts_file = artifacts_filename(log)
+            save_run_artifacts(
+                RunArtifacts(
+                    run_id=config.run_id,
+                    calls=transcript,
+                    agent_log=result.agent_log,
+                    modified_files=result.modified_files,
+                    evaluated_files=evaluated_files,
+                ),
+                log,
+                self.runs_dir,
+            )
             save_run_log(log, self.runs_dir)
             return log
 
@@ -320,14 +388,18 @@ class Executor:
         paths: TaskPaths,
         temp_task_dir: Path,
         architecture: Architecture,
-    ) -> tuple[RunResult, list[LLMCallRecord]]:
+    ) -> tuple[RunResult, list[LLMCallRecord], list[CallTranscript]]:
         """Build TaskContext and call architecture.run_timed() with timeout.
 
-        Returns the result and a record of every LLM call the architecture made.
+        Returns the result, a record of every LLM call the architecture made,
+        and the prompts/responses of those calls. If the architecture times
+        out or raises, the result's metrics are reconstructed from the
+        recorded calls and the executor's own wall-clock measurement.
         """
         provider = _RecordingProvider(get_provider(config.provider))
         ctx = self._build_context(config, paths, temp_task_dir, provider)
 
+        start = time.monotonic()
         try:
             result = await asyncio.wait_for(
                 architecture.run_timed(ctx),
@@ -336,19 +408,19 @@ class Executor:
         except asyncio.TimeoutError:
             result = RunResult(
                 status=RunStatus.TIMEOUT,
-                metrics=RunMetrics(),
+                metrics=_metrics_from_calls(provider.calls, time.monotonic() - start),
                 modified_files={},
                 error_message=f"Timed out after {config.max_wall_clock_seconds}s",
             )
         except Exception as e:
             result = RunResult(
                 status=RunStatus.ERROR,
-                metrics=RunMetrics(),
+                metrics=_metrics_from_calls(provider.calls, time.monotonic() - start),
                 modified_files={},
                 error_message=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
             )
 
-        return result, provider.calls
+        return result, provider.calls, provider.transcript
 
     def _build_context(
         self, config: RunConfig, paths: TaskPaths, temp_task_dir: Path,
@@ -383,10 +455,12 @@ class Executor:
             task_dir=temp_task_dir,
             task_spec=task_spec,
             source_files=source_files,
+            editable_files=paths.allowed_edit_files,
             public_tests_dir=public_tests,
             prompt_regime=config.prompt_regime,
             prompt_template=prompt_template,
             max_tokens=config.max_tokens,
+            max_output_tokens=config.max_output_tokens,
             max_tool_calls=config.max_tool_calls,
             timeout_seconds=config.max_wall_clock_seconds,
             model=config.model,
@@ -396,12 +470,25 @@ class Executor:
             provider=provider,
         )
 
-    def _apply_modified_files(self, modified: dict[str, str], temp_task_dir: Path) -> None:
-        """Write the architecture's modified files into the temp task directory."""
+    def _apply_modified_files(
+        self, modified: dict[str, str], temp_task_dir: Path,
+    ) -> list[str]:
+        """Write the architecture's modified files into the temp task directory.
+
+        A path that resolves outside the temp task directory (via '..',
+        an absolute path or a symlink) is not written; it is returned as a
+        policy violation instead. Returns the list of violations.
+        """
+        root = temp_task_dir.resolve()
+        violations: list[str] = []
         for rel_path, content in modified.items():
-            target = temp_task_dir / rel_path
+            target = (temp_task_dir / rel_path).resolve()
+            if target == root or not target.is_relative_to(root):
+                violations.append(f"rejected (outside workspace): {rel_path}")
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content)
+        return violations
 
     def _run_hidden_eval(
         self, task_name: str, temp_task_dir: Path

@@ -12,6 +12,6 @@ Implement the task below. Return the complete contents of every file you modifie
 
 Return complete file contents in labeled code blocks like this:
 
-```snake/game.py
+```{example_file}
 # complete file contents here
 ```

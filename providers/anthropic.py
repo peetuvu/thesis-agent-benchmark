@@ -7,8 +7,6 @@ import os
 from providers.base import LLMProvider, LLMResponse, ProviderError
 from providers.models import check_reasoning_effort
 
-_MAX_API_TOKENS = 16384
-
 
 class AnthropicProvider(LLMProvider):
     """Wraps the Anthropic SDK to provide Claude models."""
@@ -71,10 +69,11 @@ class AnthropicProvider(LLMProvider):
         try:
             import anthropic
 
-            # Cap max_tokens to avoid SDK ValueError requiring streaming
-            # for large values. Budget enforcement is handled by the executor.
-            # Adaptive thinking tokens count toward this cap.
-            api_max_tokens = min(max_tokens, _MAX_API_TOKENS)
+            # max_tokens is the run's per-call output cap, sent unchanged.
+            # Adaptive thinking tokens count toward it. The explicit timeout
+            # below also means the SDK's "streaming required" guard for large
+            # max_tokens (applied only when no timeout is given) does not apply.
+            api_max_tokens = max_tokens
 
             kwargs: dict = dict(
                 model=model,

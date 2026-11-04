@@ -60,8 +60,9 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--model", default="sonnet-4.6", help="Model alias or raw API string (default: sonnet-4.6)")
     run_parser.add_argument("--provider", default=None, help="API provider (auto-detected from model registry if omitted)")
     run_parser.add_argument("--prompt-regime", default="minimal", help="Prompt regime (minimal|production)")
-    run_parser.add_argument("--max-tokens", type=int, default=100_000, help="Total token budget")
-    run_parser.add_argument("--max-tool-calls", type=int, default=10, help="Max tool/API calls")
+    run_parser.add_argument("--max-tokens", type=int, default=100_000, help="Total token budget (recorded only, not enforced)")
+    run_parser.add_argument("--max-output-tokens", type=int, default=32_000, help="Per-call output token cap, identical for every call (default: 32000)")
+    run_parser.add_argument("--max-tool-calls", type=int, default=10, help="Max tool/API calls (recorded only, not enforced)")
     run_parser.add_argument("--max-wall-clock", type=float, default=300.0, help="Wall-clock timeout (seconds)")
     run_parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     run_parser.add_argument("--thinking", action="store_true", help="Enable extended thinking / reasoning mode (legacy models)")
@@ -107,6 +108,7 @@ def main() -> None:
                 provider=provider,
                 prompt_regime=args.prompt_regime,
                 max_tokens=args.max_tokens,
+                max_output_tokens=args.max_output_tokens,
                 max_tool_calls=args.max_tool_calls,
                 max_wall_clock_seconds=args.max_wall_clock,
                 seed=args.seed,
