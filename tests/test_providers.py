@@ -365,6 +365,7 @@ class TestOpenAIRequest:
         assert set(result.request_params) == {
             "temperature", "max_output_tokens", "seed",
             "reasoning_effort", "thinking_budget_tokens",
+            "thinking_type", "requested_reasoning_effort", "sent_params",
         }
         assert result.request_params["max_output_tokens"] == 500
 
@@ -523,3 +524,102 @@ class TestAnthropicRequestParams:
         anthropic_result, _ = _anthropic_call()
         openai_result, _ = _openai_call(_openai_response())
         assert set(anthropic_result.request_params) == set(openai_result.request_params)
+
+
+# ---------------------------------------------------------------------------
+# Explicit reasoning effort — current lineup (Claude 5.5, GPT-6)
+# ---------------------------------------------------------------------------
+
+
+_CLAUDE_55 = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
+_GPT_6 = ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+
+
+class TestAnthropicReasoningEffort:
+    @pytest.mark.parametrize("model", _CLAUDE_55)
+    def test_sends_adaptive_thinking_and_effort_without_temperature(self, model: str) -> None:
+        result, sent = _anthropic_call(model=model, temperature=0.0, reasoning_effort="low")
+        assert sent["thinking"] == {"type": "adaptive"}
+        assert sent["output_config"] == {"effort": "low"}
+        assert "extra_body" not in sent  # no temperature anywhere in the request
+        assert "temperature" not in sent
+        assert set(sent) == {
+            "model", "max_tokens", "system", "messages", "timeout", "thinking", "output_config",
+        }
+
+    def test_logs_requested_and_sent(self) -> None:
+        result, _ = _anthropic_call(model="claude-opus-5-5", reasoning_effort="low")
+        rp = result.request_params
+        assert rp["requested_reasoning_effort"] == "low"
+        assert rp["reasoning_effort"] == "low"
+        assert rp["thinking_type"] == "adaptive"
+        assert rp["temperature"] is None
+        assert rp["thinking_budget_tokens"] is None
+        assert rp["sent_params"] == {
+            "max_tokens": 4096,
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "low"},
+        }
+
+    def test_legacy_sent_params_include_extra_body_temperature(self) -> None:
+        result, _ = _anthropic_call(temperature=0.0)
+        assert result.request_params["sent_params"] == {"max_tokens": 4096, "temperature": 0.0}
+        assert result.request_params["requested_reasoning_effort"] is None
+
+    @pytest.mark.parametrize("kwargs,match", [
+        ({"model": "claude-opus-5-5"}, "requires an explicit reasoning effort"),
+        ({"model": "claude-opus-5-5", "thinking_enabled": True}, "requires an explicit"),
+        ({"model": "claude-opus-5-5", "reasoning_effort": "none"}, "does not accept"),
+        ({"model": "claude-sonnet-4-6", "reasoning_effort": "low"}, "no verified"),
+    ])
+    def test_invalid_combination_raises_before_api_call(self, kwargs: dict, match: str) -> None:
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+            provider = get_provider("anthropic")
+        provider._client.messages.create = AsyncMock()
+        args = dict(system_prompt="s", user_prompt="u", **kwargs)
+        with pytest.raises(ProviderError, match=match):
+            _run_async(provider.complete(**args))
+        provider._client.messages.create.assert_not_called()
+
+
+class TestOpenAIReasoningEffort:
+    @pytest.mark.parametrize("model", _GPT_6)
+    def test_sends_low_effort_without_temperature(self, model: str) -> None:
+        result, sent = _openai_call(
+            _openai_response(model=model), model=model, temperature=0.0, reasoning_effort="low",
+        )
+        assert sent["reasoning_effort"] == "low"
+        assert "temperature" not in sent
+        assert set(sent) == {"model", "max_completion_tokens", "messages", "timeout", "reasoning_effort"}
+        rp = result.request_params
+        assert rp["requested_reasoning_effort"] == "low"
+        assert rp["reasoning_effort"] == "low"
+        assert rp["temperature"] is None
+        assert rp["sent_params"] == {"max_completion_tokens": 4096, "reasoning_effort": "low"}
+
+    def test_luna_at_none_sends_temperature(self) -> None:
+        _, sent = _openai_call(
+            _openai_response(model="gpt-6-luna"), model="gpt-6-luna", reasoning_effort="none",
+        )
+        assert sent["reasoning_effort"] == "none"
+        assert sent["temperature"] == 0.0
+
+    def test_legacy_requested_is_none_sent_is_registry_min(self) -> None:
+        result, _ = _openai_call(_openai_response())
+        assert result.request_params["requested_reasoning_effort"] is None
+        assert result.request_params["reasoning_effort"] == "none"
+
+    @pytest.mark.parametrize("kwargs,match", [
+        ({"model": "gpt-6-astra"}, "requires an explicit reasoning effort"),
+        ({"model": "gpt-6-astra", "reasoning_effort": "none"}, "does not accept"),
+        ({"model": "gpt-6.1-sol", "reasoning_effort": "none"}, "does not accept"),
+        ({"model": "gpt-6-luna", "reasoning_effort": "low", "thinking_enabled": True}, "mutually exclusive"),
+        ({"model": "gpt-5.6-terra", "reasoning_effort": "low"}, "no verified"),
+    ])
+    def test_invalid_combination_raises_before_api_call(self, kwargs: dict, match: str) -> None:
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            provider = get_provider("openai")
+        provider._client.chat.completions.create = AsyncMock()
+        with pytest.raises(ProviderError, match=match):
+            _run_async(provider.complete(system_prompt="s", user_prompt="u", **kwargs))
+        provider._client.chat.completions.create.assert_not_called()

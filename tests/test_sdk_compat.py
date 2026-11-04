@@ -178,3 +178,112 @@ class TestAnthropicWireRequest:
         assert body["temperature"] == 1.0
         assert body["thinking"] == {"type": "enabled", "budget_tokens": 10000}
 
+
+
+# ---------------------------------------------------------------------------
+# Current lineup with explicit reasoning effort (Claude 5.5, GPT-6)
+# ---------------------------------------------------------------------------
+
+_CLAUDE_55 = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
+_GPT_6 = ["gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+
+
+class TestReasoningEffortKwargsMatchSdkSignature:
+    @pytest.mark.parametrize("model", _CLAUDE_55)
+    def test_anthropic_kwargs_bind(self, model: str) -> None:
+        kwargs = _captured_anthropic_kwargs(model=model, reasoning_effort="low")
+        _assert_binds(AsyncMessages.create, kwargs)
+
+    @pytest.mark.parametrize("model", _GPT_6)
+    def test_openai_kwargs_bind(self, model: str) -> None:
+        kwargs = _captured_openai_kwargs(model=model, reasoning_effort="low")
+        _assert_binds(AsyncCompletions.create, kwargs)
+
+    def test_sdk_type_literals_accept_values_sent(self) -> None:
+        """The values we send are in the installed SDKs' own type definitions."""
+        import typing
+
+        from anthropic.types import ThinkingConfigAdaptiveParam
+        from anthropic.types.output_config_param import OutputConfigParam
+        from openai.types.shared import ReasoningEffort
+
+        effort_hint = typing.get_type_hints(OutputConfigParam)["effort"]
+        assert "low" in typing.get_args(typing.get_args(effort_hint)[0])
+        assert typing.get_type_hints(ThinkingConfigAdaptiveParam)["type"] == typing.Literal["adaptive"]
+        assert "low" in typing.get_args(typing.get_args(ReasoningEffort)[0])
+
+
+class TestReasoningEffortWireRequest:
+    """Real SDK clients into a mock transport: the exact JSON body sent."""
+
+    def _anthropic_body(self, model: str) -> dict:
+        captured: list[httpx2.Request] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            captured.append(request)
+            return httpx2.Response(200, json={
+                "id": "msg_test", "type": "message", "role": "assistant", "model": model,
+                "content": [
+                    {"type": "thinking", "thinking": "", "signature": "sig"},
+                    {"type": "text", "text": "ok"},
+                ],
+                "stop_reason": "end_turn", "stop_sequence": None,
+                "usage": {"input_tokens": 3, "output_tokens": 1},
+            })
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+            provider = get_provider("anthropic")
+        provider._client = anthropic.AsyncAnthropic(
+            api_key="test-key", max_retries=0,
+            http_client=anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(handler)),
+        )
+        result = _run_async(provider.complete(
+            model=model, system_prompt="s", user_prompt="u", reasoning_effort="low",
+        ))
+        assert result.text == "ok"  # thinking block contributes no text
+        assert len(captured) == 1
+        return json.loads(captured[0].content)
+
+    def _openai_body(self, model: str) -> dict:
+        import openai
+
+        captured: list[httpx2.Request] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            captured.append(request)
+            return httpx2.Response(200, json={
+                "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": model,
+                "choices": [{"index": 0, "finish_reason": "stop",
+                             "message": {"role": "assistant", "content": "ok", "refusal": None}}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+            })
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            provider = get_provider("openai")
+        provider._client = openai.AsyncOpenAI(
+            api_key="test-key", max_retries=0,
+            http_client=openai.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(handler)),
+        )
+        result = _run_async(provider.complete(
+            model=model, system_prompt="s", user_prompt="u", reasoning_effort="low",
+        ))
+        assert result.text == "ok"
+        assert len(captured) == 1
+        return json.loads(captured[0].content)
+
+    @pytest.mark.parametrize("model", _CLAUDE_55)
+    def test_anthropic_body(self, model: str) -> None:
+        body = self._anthropic_body(model)
+        assert body["thinking"] == {"type": "adaptive"}
+        assert body["output_config"] == {"effort": "low"}
+        for rejected in ("temperature", "top_p", "top_k"):
+            assert rejected not in body
+        assert set(body) == {"model", "max_tokens", "system", "messages", "thinking", "output_config"}
+
+    @pytest.mark.parametrize("model", _GPT_6)
+    def test_openai_body(self, model: str) -> None:
+        body = self._openai_body(model)
+        assert body["reasoning_effort"] == "low"
+        for rejected in ("temperature", "top_p", "max_tokens", "logprobs"):
+            assert rejected not in body
+        assert set(body) == {"model", "messages", "max_completion_tokens", "reasoning_effort"}

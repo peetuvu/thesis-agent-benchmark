@@ -30,6 +30,7 @@ class ActualMetrics(BaseModel):
     api_calls: int = 0
     wall_clock_seconds: float = 0.0
     estimated_cost_usd: float = 0.0
+    price_source: str | None = None  # pricing table entry used; None = model not priced
 
 
 class EvalResults(BaseModel):
@@ -51,6 +52,7 @@ class LLMCallRecord(BaseModel):
     output_tokens: int = 0
     request_params: dict[str, Any] = Field(default_factory=dict)
     usage_details: dict[str, int] = Field(default_factory=dict)
+    estimated_cost_usd: float | None = None  # None = model not priced
     error: str | None = None  # set if the call raised instead of returning
 
 
@@ -68,6 +70,8 @@ class SamplingConfig(BaseModel):
     seed: int | None = None
     reasoning_effort: str | None = None
     thinking_budget_tokens: int | None = None
+    thinking_type: str | None = None
+    requested_reasoning_effort: str | None = None
     consistent_across_calls: bool = True
 
     @classmethod
@@ -77,7 +81,8 @@ class SamplingConfig(BaseModel):
         values: dict[str, Any] = {}
         consistent = True
         for key in ("temperature", "max_output_tokens", "seed",
-                    "reasoning_effort", "thinking_budget_tokens"):
+                    "reasoning_effort", "thinking_budget_tokens",
+                    "thinking_type", "requested_reasoning_effort"):
             distinct = {repr(p.get(key)) for p in params}
             if len(distinct) == 1:
                 values[key] = params[0].get(key)
@@ -93,12 +98,16 @@ class RunLog(BaseModel):
     timestamp: datetime
     git_commit: str | None = None
     git_branch: str | None = None
+    git_dirty: bool | None = None
+    """True if the working tree had uncommitted changes (tracked or untracked,
+    excluding gitignored files) when the run started; None if unknown."""
 
     task_name: str
     architecture_name: str
     prompt_regime: str
     model: str
     provider: str
+    requested_reasoning_effort: str | None = None  # RunConfig.reasoning_effort
 
     budget_config: BudgetConfig
     sampling: SamplingConfig = Field(default_factory=SamplingConfig)
@@ -128,6 +137,24 @@ def get_git_info() -> tuple[str | None, str | None]:
         return commit_hash, branch_name
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None, None
+
+
+def get_git_dirty(cwd: Path | None = None) -> bool | None:
+    """Return True if the working tree has uncommitted changes, None if unknown.
+
+    Counts staged, unstaged and untracked files; gitignored files (e.g. run
+    logs under runs/) do not count.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            capture_output=True, text=True, timeout=10, cwd=cwd,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return bool(proc.stdout.strip())
 
 
 def _fmt_param(value: Any) -> str:
@@ -176,7 +203,8 @@ def _render_markdown(log: RunLog) -> str:
         f"| Tokens (total) | {am.tokens_total} | {bc.max_tokens} |",
         f"| API calls | {am.api_calls} | {bc.max_tool_calls} |",
         f"| Wall clock (s) | {am.wall_clock_seconds:.1f} | {bc.max_wall_clock_seconds:.1f} |",
-        f"| Est. cost (USD) | ${am.estimated_cost_usd:.4f} | — |",
+        f"| Est. cost (USD) | "
+        f"{f'${am.estimated_cost_usd:.4f}' if am.price_source else 'not priced'} | — |",
         "",
         "## Sampling (as sent to API)",
         "",
@@ -185,7 +213,9 @@ def _render_markdown(log: RunLog) -> str:
         f"| Temperature | {_fmt_param(log.sampling.temperature)} |",
         f"| Max output tokens / call | {_fmt_param(log.sampling.max_output_tokens)} |",
         f"| Seed | {_fmt_param(log.sampling.seed)} |",
-        f"| Reasoning effort | {_fmt_param(log.sampling.reasoning_effort)} |",
+        f"| Reasoning effort (requested) | {_fmt_param(log.requested_reasoning_effort)} |",
+        f"| Reasoning effort (sent) | {_fmt_param(log.sampling.reasoning_effort)} |",
+        f"| Thinking type | {_fmt_param(log.sampling.thinking_type)} |",
         f"| Thinking budget tokens | {_fmt_param(log.sampling.thinking_budget_tokens)} |",
         "",
     ])
@@ -221,6 +251,8 @@ def _render_markdown(log: RunLog) -> str:
         lines.extend(["", "## Git", "", f"- Commit: `{log.git_commit}`"])
     if log.git_branch:
         lines.append(f"- Branch: `{log.git_branch}`")
+    if log.git_dirty is not None:
+        lines.append(f"- Uncommitted changes at start: {'yes' if log.git_dirty else 'no'}")
 
     lines.append("")  # trailing newline
     return "\n".join(lines)

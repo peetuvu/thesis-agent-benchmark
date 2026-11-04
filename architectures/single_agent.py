@@ -46,6 +46,7 @@ class SingleAgent(Architecture):
                 temperature=0.0,
                 seed=ctx.seed,
                 thinking_enabled=ctx.thinking_enabled,
+                reasoning_effort=ctx.reasoning_effort,
             )
         except ProviderError as e:
             return RunResult(

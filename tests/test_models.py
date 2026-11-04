@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 
 from providers.models import (
+    LEGACY_ALIASES,
     MODELS,
+    REASONING_EFFORTS,
+    check_reasoning_effort,
     get_model,
     get_model_by_api_string,
     list_models,
@@ -95,12 +98,96 @@ class TestRegistryConsistency:
         for alias, info in MODELS.items():
             assert info["tier"] in {"fast", "mid", "flagship"}, alias
 
-    def test_each_provider_has_one_model_per_tier(self) -> None:
+    @pytest.mark.parametrize("legacy", [False, True], ids=["current", "legacy"])
+    def test_each_provider_has_one_model_per_tier(self, legacy: bool) -> None:
         for provider in ("anthropic", "openai"):
-            tiers = sorted(i["tier"] for i in MODELS.values() if i["provider"] == provider)
+            tiers = sorted(
+                i["tier"] for a, i in MODELS.items()
+                if i["provider"] == provider and (a in LEGACY_ALIASES) == legacy
+            )
             assert tiers == ["fast", "flagship", "mid"], provider
 
-    def test_openai_models_declare_min_reasoning_effort(self) -> None:
+    def test_legacy_openai_models_declare_min_reasoning_effort(self) -> None:
         for alias, info in MODELS.items():
-            if info["provider"] == "openai":
+            if info["provider"] == "openai" and alias in LEGACY_ALIASES:
                 assert info.get("min_reasoning_effort") == "none", alias
+
+    def test_legacy_aliases_exist(self) -> None:
+        assert LEGACY_ALIASES <= set(MODELS)
+
+    def test_current_models_require_reasoning_effort_and_accept_low(self) -> None:
+        for alias, info in MODELS.items():
+            if alias not in LEGACY_ALIASES:
+                assert info.get("requires_reasoning_effort") is True, alias
+                assert "low" in info["reasoning_efforts"], alias
+                assert set(info["reasoning_efforts"]) <= set(REASONING_EFFORTS), alias
+
+
+class TestLegacyEntriesFrozen:
+    """Existing run logs reference these entries; they must never change."""
+
+    FROZEN = {
+        "opus-4.6": {"api_string": "claude-opus-4-6", "provider": "anthropic", "tier": "flagship", "description": "The most intelligent model for building agents and coding"},
+        "sonnet-4.6": {"api_string": "claude-sonnet-4-6", "provider": "anthropic", "tier": "mid", "description": "The best combination of speed and intelligence"},
+        "haiku-4.5": {"api_string": "claude-haiku-4-5-20251001", "provider": "anthropic", "tier": "fast", "description": "The fastest model with near-frontier intelligence"},
+        "gpt-5.6-sol": {"api_string": "gpt-5.6-sol", "provider": "openai", "tier": "flagship", "min_reasoning_effort": "none", "description": "Most capable GPT-5.6 model ($4/$20 per MTok)"},
+        "gpt-5.6-terra": {"api_string": "gpt-5.6-terra", "provider": "openai", "tier": "mid", "min_reasoning_effort": "none", "description": "Balanced GPT-5.6 model ($2/$12 per MTok)"},
+        "gpt-5.6-luna": {"api_string": "gpt-5.6-luna", "provider": "openai", "tier": "fast", "min_reasoning_effort": "none", "description": "Fast, low-cost GPT-5.6 model ($0.2/$1.2 per MTok)"},
+    }
+
+    @pytest.mark.parametrize("alias", sorted(FROZEN))
+    def test_entry_unchanged(self, alias: str) -> None:
+        assert MODELS[alias] == self.FROZEN[alias]
+
+    def test_frozen_set_is_the_legacy_set(self) -> None:
+        assert set(self.FROZEN) == LEGACY_ALIASES
+
+
+class TestCurrentLineup:
+    @pytest.mark.parametrize("alias,api_string,provider,tier", [
+        ("haiku-5.5", "claude-haiku-5-5", "anthropic", "fast"),
+        ("sonnet-5.5", "claude-sonnet-5-5", "anthropic", "mid"),
+        ("opus-5.5", "claude-opus-5-5", "anthropic", "flagship"),
+        ("gpt-6-luna", "gpt-6-luna", "openai", "fast"),
+        ("gpt-6.1-sol", "gpt-6.1-sol", "openai", "mid"),
+        ("gpt-6-astra", "gpt-6-astra", "openai", "flagship"),
+    ])
+    def test_alias_resolves(self, alias: str, api_string: str, provider: str, tier: str) -> None:
+        assert resolve_model(alias) == (api_string, provider)
+        assert get_model(alias)["tier"] == tier
+
+    def test_list_models_marks_legacy(self) -> None:
+        lines = list_models().splitlines()
+        assert any("opus-4.6" in l and "(legacy)" in l for l in lines)
+        assert not any("opus-5.5" in l and "(legacy)" in l for l in lines)
+
+
+class TestCheckReasoningEffort:
+    def test_current_model_accepts_low(self) -> None:
+        for alias in ("haiku-5.5", "sonnet-5.5", "opus-5.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"):
+            check_reasoning_effort(get_model(alias)["api_string"], "low")
+
+    def test_current_model_requires_effort(self) -> None:
+        with pytest.raises(ValueError, match="requires an explicit reasoning effort"):
+            check_reasoning_effort("claude-opus-5-5", None)
+
+    @pytest.mark.parametrize("model,effort", [
+        ("gpt-6-astra", "none"), ("gpt-6.1-sol", "none"), ("claude-opus-5-5", "none"),
+        ("claude-haiku-5-5", "minimal"),
+    ])
+    def test_unsupported_effort_rejected(self, model: str, effort: str) -> None:
+        with pytest.raises(ValueError, match="does not accept reasoning effort"):
+            check_reasoning_effort(model, effort)
+
+    def test_legacy_model_without_effort_ok(self) -> None:
+        check_reasoning_effort("claude-sonnet-4-6", None)
+        check_reasoning_effort("gpt-5.6-terra", None, thinking_enabled=True)
+
+    @pytest.mark.parametrize("model", ["claude-sonnet-4-6", "gpt-5.6-terra", "unregistered-x"])
+    def test_effort_rejected_for_models_without_declared_support(self, model: str) -> None:
+        with pytest.raises(ValueError, match="no verified reasoning-effort support"):
+            check_reasoning_effort(model, "low")
+
+    def test_effort_and_thinking_mutually_exclusive(self) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            check_reasoning_effort("claude-opus-5-5", "low", thinking_enabled=True)

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from architectures.base import Architecture, RunMetrics, RunResult, RunStatus, TaskContext
 from providers import get_provider
+from providers.pricing import estimate_call_cost, get_price
 from providers.base import (
     NORMAL_STOP_REASONS,
     TRUNCATION_STOP_REASONS,
@@ -29,6 +30,7 @@ from runner.logger import (
     LLMCallRecord,
     RunLog,
     SamplingConfig,
+    get_git_dirty,
     get_git_info,
     save_run_log,
 )
@@ -67,8 +69,10 @@ _NO_RESULTS = "hidden_eval_no_results"
 class _RecordingProvider(LLMProvider):
     """Transparent wrapper that records every call made through a provider.
 
-    Lets the executor log what was actually sent and why each call stopped,
-    for any architecture, without architectures having to report it.
+    Lets the executor log what was actually sent, why each call stopped and
+    what it cost, for any architecture, without architectures having to
+    report it. Cost is priced by the requested model string (the response
+    may name a dated snapshot).
     """
 
     def __init__(self, inner: LLMProvider) -> None:
@@ -88,6 +92,7 @@ class _RecordingProvider(LLMProvider):
         temperature: float = 0.0,
         seed: int | None = None,
         thinking_enabled: bool = False,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         try:
             response = await self._inner.complete(
@@ -98,6 +103,7 @@ class _RecordingProvider(LLMProvider):
                 temperature=temperature,
                 seed=seed,
                 thinking_enabled=thinking_enabled,
+                reasoning_effort=reasoning_effort,
             )
         except ProviderError as e:
             self.calls.append(LLMCallRecord(model=model, error=str(e)))
@@ -109,6 +115,12 @@ class _RecordingProvider(LLMProvider):
             output_tokens=response.output_tokens,
             request_params=response.request_params,
             usage_details=response.usage_details,
+            estimated_cost_usd=estimate_call_cost(
+                model,
+                response.input_tokens,
+                response.output_tokens,
+                response.usage_details.get("cached_input_tokens", 0),
+            ),
         ))
         return response
 
@@ -188,6 +200,10 @@ class Executor:
         """Execute the full benchmark pipeline for one run."""
         paths = TaskPaths(config.task_name, self.repo_root)
 
+        # --- 0. Record code version as of run start ---
+        git_commit, git_branch = get_git_info()
+        git_dirty = get_git_dirty(cwd=self.repo_root)
+
         # --- 1. Pre-snapshot eval/ ---
         eval_pre = snapshot_directory(paths.eval_dir)
 
@@ -237,7 +253,8 @@ class Executor:
             policy_compliant = len(all_violations) == 0
 
             # --- 11. Assemble RunLog ---
-            git_commit, git_branch = get_git_info()
+            price = get_price(config.model)
+            estimated_cost = sum(c.estimated_cost_usd or 0.0 for c in llm_calls)
 
             status, stop_reason = _derive_outcome(
                 result, hidden_passed, hidden_total, hidden_failing,
@@ -249,11 +266,13 @@ class Executor:
                 timestamp=config.timestamp,
                 git_commit=git_commit,
                 git_branch=git_branch,
+                git_dirty=git_dirty,
                 task_name=config.task_name,
                 architecture_name=config.architecture_name,
                 prompt_regime=config.prompt_regime,
                 model=config.model,
                 provider=config.provider,
+                requested_reasoning_effort=config.reasoning_effort,
                 budget_config=BudgetConfig(
                     max_tokens=config.max_tokens,
                     max_tool_calls=config.max_tool_calls,
@@ -266,7 +285,10 @@ class Executor:
                     tokens_total=result.metrics.total_tokens,
                     api_calls=result.metrics.api_calls,
                     wall_clock_seconds=result.metrics.wall_time_seconds,
-                    estimated_cost_usd=result.metrics.estimated_cost_usd,
+                    estimated_cost_usd=(
+                        estimated_cost if price else result.metrics.estimated_cost_usd
+                    ),
+                    price_source=price.source if price else None,
                 ),
                 test_results=EvalResults(
                     public_passed=public_passed,
@@ -370,6 +392,7 @@ class Executor:
             model=config.model,
             seed=config.seed,
             thinking_enabled=config.thinking_enabled,
+            reasoning_effort=config.reasoning_effort,
             provider=provider,
         )
 

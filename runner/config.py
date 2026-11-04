@@ -7,7 +7,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from providers.models import check_reasoning_effort
 
 
 def _generate_run_id() -> str:
@@ -41,8 +43,16 @@ class RunConfig(BaseModel):
     max_wall_clock_seconds: float = 300.0
     seed: int | None = None
     thinking_enabled: bool = False
+    reasoning_effort: str | None = None
+    """Explicit reasoning effort sent on every call (e.g. 'low'); see providers/models.py."""
     run_id: str = Field(default_factory=_generate_run_id)
     timestamp: datetime = Field(default_factory=_generate_timestamp)
+
+    @model_validator(mode="after")
+    def _validate_reasoning_effort(self) -> RunConfig:
+        """Reject an invalid model/effort combination before any API call is made."""
+        check_reasoning_effort(self.model, self.reasoning_effort, self.thinking_enabled)
+        return self
 
 
 class TaskPaths:

@@ -106,7 +106,8 @@ D2: Provider-specific telemetry extraction (incremental)
 - [ ] Anthropic API: extract token usage from response metadata
 - [ ] OpenAI API: extract token usage from response metadata
 - [ ] Google API: extract token usage (if available)
-- [ ] Cost estimation: model → price-per-token lookup table
+- [x] Cost estimation: model → price-per-token lookup table
+      (providers/pricing.py; current lineup + Anthropic 4.x legacy, each price cites its source)
 - [ ] Don't let "can't get tokens from provider X" block logging
       for provider Y
 

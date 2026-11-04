@@ -7,14 +7,19 @@ Model names are passed straight through to bench, which owns alias resolution
 via providers/models.py. Errors in one run do not abort the batch; a summary
 JSON is written to runs/.
 
-Usage:
+Usage (current lineup; `bench models` lists every alias):
   python scripts/run_batch.py \
     --tasks diffapply calculator \
-    --models haiku-4.5 sonnet-4.6 opus-4.6 \
+    --models haiku-5.5 sonnet-5.5 opus-5.5 gpt-6-luna gpt-6.1-sol gpt-6-astra \
+    --reasoning-effort low \
     --archs single_agent sequential \
     --regimes minimal production \
     --reps 3 \
     --dry-run
+
+The provider is auto-detected per model from the registry, so one batch can
+mix providers. Current-lineup models require --reasoning-effort; the legacy
+aliases (haiku-4.5, sonnet-4.6, opus-4.6, gpt-5.6-*) must be run without it.
 
 Run from the thesis-agents repo root.
 """
@@ -80,7 +85,14 @@ def main() -> int:
         "--regimes", nargs="+", default=["minimal", "production"], help="Prompt regimes"
     )
     parser.add_argument("--reps", type=int, default=3, help="Repetitions per combination")
-    parser.add_argument("--provider", default="anthropic", help="Provider name")
+    parser.add_argument(
+        "--provider", default=None,
+        help="Force a provider for every model (default: auto-detect from registry)",
+    )
+    parser.add_argument(
+        "--reasoning-effort", default=None,
+        help="Reasoning effort passed to every run (e.g. low)",
+    )
     parser.add_argument(
         "--dry-run", action="store_true", help="Print planned runs without executing"
     )
@@ -117,9 +129,11 @@ def main() -> int:
             r["model"],
             "--prompt-regime",
             r["regime"],
-            "--provider",
-            args.provider,
         ]
+        if args.provider:
+            cmd += ["--provider", args.provider]
+        if args.reasoning_effort:
+            cmd += ["--reasoning-effort", args.reasoning_effort]
 
         outcome = {
             **r,
@@ -191,6 +205,7 @@ def main() -> int:
         "succeeded": succeeded,
         "errors": n_errors,
         "provider": args.provider,
+        "reasoning_effort": args.reasoning_effort,
         "reps": args.reps,
         "outcomes": outcomes,
     }

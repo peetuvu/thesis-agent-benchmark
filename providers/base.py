@@ -45,8 +45,13 @@ class LLMResponse:
     """Sampling parameters actually sent to the API, after provider adjustments.
 
     Standard keys: temperature, max_output_tokens, seed, reasoning_effort,
-    thinking_budget_tokens. A value of None means the parameter was not sent
-    (the provider's default applied).
+    thinking_budget_tokens, thinking_type, requested_reasoning_effort,
+    sent_params. A value of None means the parameter was not sent (the
+    provider's default applied). reasoning_effort is the effort actually sent
+    (OpenAI reasoning_effort / Anthropic output_config.effort);
+    requested_reasoning_effort is what the run configuration asked for.
+    sent_params is the exact request body minus model, system/messages and
+    client options, for auditing what reached the API.
     """
 
     usage_details: dict[str, int] = field(default_factory=dict)
@@ -84,6 +89,7 @@ class LLMProvider(ABC):
         temperature: float = 0.0,
         seed: int | None = None,
         thinking_enabled: bool = False,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """Send a completion request and return a standardized response.
 
@@ -94,7 +100,11 @@ class LLMProvider(ABC):
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (0.0 = deterministic).
             seed: Random seed for reproducibility (provider support varies).
-            thinking_enabled: Enable extended thinking / reasoning mode.
+            thinking_enabled: Enable extended thinking / reasoning mode (legacy
+                control; mutually exclusive with reasoning_effort).
+            reasoning_effort: Explicit reasoning effort (e.g. 'low'), mapped to
+                the provider's own parameter. None keeps the legacy behavior.
+                Validated against the model registry before any API call.
 
         Returns:
             LLMResponse with text, token counts, and metadata.

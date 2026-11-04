@@ -9,7 +9,9 @@ import sys
 from inspect import isclass
 
 from architectures.base import Architecture
-from providers.models import list_models, resolve_model
+from pydantic import ValidationError
+
+from providers.models import REASONING_EFFORTS, list_models, resolve_model
 from runner.config import RunConfig
 from runner.executor import Executor
 
@@ -62,7 +64,13 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--max-tool-calls", type=int, default=10, help="Max tool/API calls")
     run_parser.add_argument("--max-wall-clock", type=float, default=300.0, help="Wall-clock timeout (seconds)")
     run_parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
-    run_parser.add_argument("--thinking", action="store_true", help="Enable extended thinking / reasoning mode")
+    run_parser.add_argument("--thinking", action="store_true", help="Enable extended thinking / reasoning mode (legacy models)")
+    run_parser.add_argument(
+        "--reasoning-effort", choices=REASONING_EFFORTS, default=None,
+        help="Explicit reasoning effort, mapped per provider (Anthropic: adaptive thinking + "
+             "output_config.effort; OpenAI: reasoning_effort). Required for current-lineup "
+             "models; not combinable with --thinking",
+    )
 
     sub.add_parser("models", help="List available models")
 
@@ -91,18 +99,24 @@ def main() -> None:
 
         architecture = _load_architecture(args.arch)
 
-        config = RunConfig(
-            task_name=args.task,
-            architecture_name=args.arch,
-            model=api_string,
-            provider=provider,
-            prompt_regime=args.prompt_regime,
-            max_tokens=args.max_tokens,
-            max_tool_calls=args.max_tool_calls,
-            max_wall_clock_seconds=args.max_wall_clock,
-            seed=args.seed,
-            thinking_enabled=args.thinking,
-        )
+        try:
+            config = RunConfig(
+                task_name=args.task,
+                architecture_name=args.arch,
+                model=api_string,
+                provider=provider,
+                prompt_regime=args.prompt_regime,
+                max_tokens=args.max_tokens,
+                max_tool_calls=args.max_tool_calls,
+                max_wall_clock_seconds=args.max_wall_clock,
+                seed=args.seed,
+                thinking_enabled=args.thinking,
+                reasoning_effort=args.reasoning_effort,
+            )
+        except ValidationError as e:
+            for err in e.errors():
+                print(f"Error: {err['msg']}", file=sys.stderr)
+            sys.exit(2)
 
         executor = Executor()
         log = asyncio.run(executor.run(config, architecture))

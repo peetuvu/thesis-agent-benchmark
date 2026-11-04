@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 from providers.base import LLMProvider, LLMResponse, ProviderError
-from providers.models import get_model_by_api_string
+from providers.models import check_reasoning_effort, get_model_by_api_string
 
 # Same per-call output cap as the Anthropic provider, so the per-call output
 # limit is not a cross-provider confound. Budget enforcement is handled by the
@@ -22,13 +22,19 @@ def _int_or_zero(value: Any) -> int:
     return value if isinstance(value, int) else 0
 
 
-def _reasoning_effort(model: str, thinking_enabled: bool) -> str | None:
+def _reasoning_effort(
+    model: str, thinking_enabled: bool, requested: str | None = None,
+) -> str | None:
     """Choose the reasoning_effort to send, or None to omit the parameter.
 
-    Registered reasoning models get their lowest supported effort (ideally
-    "none", i.e. effectively non-reasoning), or _THINKING_EFFORT when thinking
-    is enabled. Unregistered models get no reasoning_effort at all.
+    An explicitly requested effort (already validated against the registry)
+    is sent as-is. Otherwise (legacy behavior) registered reasoning models get
+    their lowest supported effort (ideally "none", i.e. effectively
+    non-reasoning), or _THINKING_EFFORT when thinking is enabled, and
+    unregistered models get no reasoning_effort at all.
     """
+    if requested is not None:
+        return requested
     info = get_model_by_api_string(model)
     min_effort = info.get("min_reasoning_effort") if info else None
     if min_effort is None:
@@ -66,21 +72,29 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.0,
         seed: int | None = None,
         thinking_enabled: bool = False,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """Send a completion request to the OpenAI Chat Completions API.
 
         - Uses max_completion_tokens (max_tokens is deprecated and rejected by
           reasoning models), capped at _MAX_API_TOKENS like the Anthropic provider.
-        - For registered reasoning models, sends reasoning_effort (see
-          _reasoning_effort). OpenAI rejects temperature when effort is not
-          "none", so temperature is then omitted and recorded as None.
+        - reasoning_effort, when given, is validated against the registry and
+          sent as-is (required for the GPT-6 entries). Otherwise registered
+          reasoning models get their legacy effort (see _reasoning_effort).
+          OpenAI rejects temperature when effort is not "none", so temperature
+          is then omitted and recorded as None.
         - seed is passed through when given (best-effort determinism, beta).
 
         output_tokens is usage.completion_tokens, which includes reasoning
         tokens; this matches Anthropic, whose output_tokens includes thinking.
         """
+        try:
+            check_reasoning_effort(model, reasoning_effort, thinking_enabled)
+        except ValueError as e:
+            raise ProviderError("openai", str(e)) from e
+
         api_max_tokens = min(max_tokens, _MAX_API_TOKENS)
-        effort = _reasoning_effort(model, thinking_enabled)
+        effort = _reasoning_effort(model, thinking_enabled, reasoning_effort)
         sent_temperature = temperature if effort in (None, "none") else None
 
         kwargs: dict = dict(
@@ -147,6 +161,12 @@ class OpenAIProvider(LLMProvider):
                 "seed": seed,
                 "reasoning_effort": effort,
                 "thinking_budget_tokens": None,
+                "thinking_type": None,
+                "requested_reasoning_effort": reasoning_effort,
+                "sent_params": {
+                    k: v for k, v in kwargs.items()
+                    if k not in ("model", "messages", "timeout")
+                },
             },
             usage_details=usage_details,
         )

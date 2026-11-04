@@ -388,7 +388,8 @@ class TestRunLogSampling:
         _, md_path = save_run_log(log, tmp_path)
         md = md_path.read_text()
         assert "| Temperature | 0.0 |" in md
-        assert "| Reasoning effort | none |" in md
+        assert "| Reasoning effort (sent) | none |" in md
+        assert "| Reasoning effort (requested) | not sent |" in md
         assert "| Seed | not sent |" in md
         assert "## LLM calls" in md
 
@@ -403,7 +404,8 @@ class _FakeProvider(LLMProvider):
         return "fake"
 
     async def complete(self, model, system_prompt, user_prompt, max_tokens=4096,
-                       temperature=0.0, seed=None, thinking_enabled=False) -> LLMResponse:
+                       temperature=0.0, seed=None, thinking_enabled=False,
+                       reasoning_effort=None) -> LLMResponse:
         if self._error:
             raise ProviderError("fake", self._error)
         return self._response
@@ -619,3 +621,167 @@ class TestExecutorEndToEndOpenAI:
         )
         assert log.status == "failure"
         assert "syntax or import error" in log.stop_reason
+
+
+# ---------------------------------------------------------------------------
+# Git working-tree state, reasoning-effort config, cost estimation
+# ---------------------------------------------------------------------------
+
+import subprocess
+
+from runner.logger import get_git_dirty
+
+
+class TestGitDirty:
+    def _repo(self, tmp_path: Path) -> Path:
+        def git(*args: str) -> None:
+            subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+        git("init", "-q")
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "t")
+        (tmp_path / ".gitignore").write_text("runs/\n")
+        (tmp_path / "a.py").write_text("x = 1\n")
+        git("add", ".")
+        git("commit", "-q", "-m", "init")
+        return tmp_path
+
+    def test_clean_tree(self, tmp_path: Path) -> None:
+        assert get_git_dirty(cwd=self._repo(tmp_path)) is False
+
+    def test_modified_tracked_file(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path)
+        (repo / "a.py").write_text("x = 2\n")
+        assert get_git_dirty(cwd=repo) is True
+
+    def test_untracked_file_counts(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path)
+        (repo / "new.py").write_text("")
+        assert get_git_dirty(cwd=repo) is True
+
+    def test_ignored_run_logs_do_not_count(self, tmp_path: Path) -> None:
+        repo = self._repo(tmp_path)
+        (repo / "runs").mkdir()
+        (repo / "runs" / "log.json").write_text("{}")
+        assert get_git_dirty(cwd=repo) is False
+
+    def test_not_a_repo_is_unknown(self, tmp_path: Path) -> None:
+        assert get_git_dirty(cwd=tmp_path) is None
+
+    def test_old_logs_without_field_still_load(self) -> None:
+        data = _make_run_log().model_dump(mode="json")
+        del data["git_dirty"], data["requested_reasoning_effort"]
+        assert RunLog.model_validate(data).git_dirty is None
+
+
+class TestRunConfigReasoningEffort:
+    def test_default_is_none(self) -> None:
+        assert RunConfig(task_name="snake", architecture_name="x").reasoning_effort is None
+
+    def test_valid_effort_accepted(self) -> None:
+        cfg = RunConfig(task_name="snake", architecture_name="x",
+                        model="claude-opus-5-5", reasoning_effort="low")
+        assert cfg.reasoning_effort == "low"
+
+    @pytest.mark.parametrize("kwargs", [
+        {"model": "claude-opus-5-5"},
+        {"model": "gpt-6-astra", "reasoning_effort": "none"},
+        {"model": "claude-sonnet-4-6", "reasoning_effort": "low"},
+        {"model": "gpt-6-luna", "reasoning_effort": "low", "thinking_enabled": True},
+    ])
+    def test_invalid_rejected_at_config_time(self, kwargs: dict) -> None:
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            RunConfig(task_name="snake", architecture_name="x", **kwargs)
+
+
+class TestCliReasoningEffort:
+    def test_flag_parsed(self) -> None:
+        from runner.cli import _build_parser
+        args = _build_parser().parse_args(
+            ["run", "--task", "snake", "--arch", "single_agent",
+             "--model", "opus-5.5", "--reasoning-effort", "low"]
+        )
+        assert args.reasoning_effort == "low"
+
+    def test_invalid_combination_exits_before_run(self, capsys) -> None:
+        from runner import cli
+        argv = ["bench", "run", "--task", "snake", "--arch", "single_agent", "--model", "opus-5.5"]
+        with patch("sys.argv", argv), patch.object(cli.Executor, "run") as run, \
+             pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 2
+        run.assert_not_called()
+        assert "requires an explicit reasoning effort" in capsys.readouterr().err
+
+
+class TestExecutorEndToEndAnthropicEffort:
+    """Full executor run, real AnthropicProvider + SingleAgent, Claude 5.5 at effort low."""
+
+    def _run(self, tmp_path: Path, dirty: bool | None = True) -> RunLog:
+        from architectures.single_agent import SingleAgent
+        from providers.anthropic import AnthropicProvider
+
+        response = SimpleNamespace(
+            content=[
+                SimpleNamespace(type="thinking", thinking="", signature="sig"),
+                SimpleNamespace(type="text", text="```snake/game.py\nclass SnakeGame:\n    pass\n```\n"),
+            ],
+            usage=SimpleNamespace(input_tokens=2000, output_tokens=1000),
+            model="claude-opus-5-5",
+            stop_reason="end_turn",
+        )
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+            provider = AnthropicProvider()
+        provider._client.messages.create = AsyncMock(return_value=response)
+
+        executor = Executor()
+        executor.runs_dir = tmp_path
+        config = RunConfig(
+            task_name="snake", architecture_name="single_agent",
+            model="claude-opus-5-5", provider="anthropic", reasoning_effort="low",
+        )
+        with patch("runner.executor.get_provider", return_value=provider), \
+             patch("runner.executor.get_git_dirty", return_value=dirty), \
+             patch.object(Executor, "_run_hidden_eval", return_value=(15, 15, [])), \
+             patch.object(Executor, "_run_public_tests", return_value=(3, 3, [])):
+            return _run_async(executor.run(config, SingleAgent()))
+
+    def test_effort_logged_requested_and_sent(self, tmp_path: Path) -> None:
+        log = self._run(tmp_path)
+        assert log.status == "success"
+        assert log.requested_reasoning_effort == "low"
+        assert log.sampling.requested_reasoning_effort == "low"
+        assert log.sampling.reasoning_effort == "low"
+        assert log.sampling.thinking_type == "adaptive"
+        assert log.sampling.temperature is None
+        sent = log.llm_calls[0].request_params["sent_params"]
+        assert sent["output_config"] == {"effort": "low"}
+        assert "temperature" not in sent
+
+    def test_cost_estimated(self, tmp_path: Path) -> None:
+        log = self._run(tmp_path)
+        expected = (2000 * 4.00 + 1000 * 20.00) / 1e6
+        assert log.llm_calls[0].estimated_cost_usd == pytest.approx(expected)
+        assert log.actual_metrics.estimated_cost_usd == pytest.approx(expected)
+        assert "platform.claude.com" in log.actual_metrics.price_source
+
+    def test_git_dirty_recorded(self, tmp_path: Path) -> None:
+        log = self._run(tmp_path, dirty=True)
+        assert log.git_dirty is True
+        saved = json.loads(next(tmp_path.glob("*.json")).read_text())
+        assert saved["git_dirty"] is True
+        md = next(tmp_path.glob("*.md")).read_text()
+        assert "Uncommitted changes at start: yes" in md
+        assert "| Reasoning effort (requested) | low |" in md
+
+
+class TestUnpricedModelCost:
+    def test_legacy_model_not_priced(self, tmp_path: Path) -> None:
+        log = TestExecutorEndToEndOpenAI()._run(
+            tmp_path, "```snake/game.py\nclass SnakeGame:\n    pass\n```\n",
+        )
+        assert log.actual_metrics.estimated_cost_usd == 0.0
+        assert log.actual_metrics.price_source is None
+        assert log.llm_calls[0].estimated_cost_usd is None
+        md = next(tmp_path.glob("*.md")).read_text()
+        assert "| Est. cost (USD) | not priced |" in md

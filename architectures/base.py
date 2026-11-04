@@ -66,6 +66,9 @@ class TaskContext:
     thinking_enabled: bool = False
     """Whether to enable extended thinking / reasoning mode."""
 
+    reasoning_effort: str | None = None
+    """Explicit reasoning effort (e.g. 'low'); passed to every provider call."""
+
     provider: LLMProvider | None = None
     """LLM provider instance for making API calls."""
 

@@ -51,6 +51,8 @@ thesis-agents/
 ├── providers/                 # LLM PROVIDER ABSTRACTION (to be built)
 │   ├── __init__.py
 │   ├── base.py                # LLMProvider ABC + LLMResponse dataclass
+│   ├── models.py              # Model registry (aliases, tiers, reasoning efforts)
+│   ├── pricing.py             # Per-model USD/MTok prices for cost estimation
 │   ├── anthropic.py           # Anthropic Claude SDK wrapper
 │   ├── openai.py              # OpenAI GPT SDK wrapper
 │   └── google.py              # Google Gemini SDK wrapper (add when needed)
@@ -71,7 +73,7 @@ thesis-agents/
 ├── runs/                      # RUN LOGS — structured JSON + markdown per run
 │   └── .gitkeep
 │
-└── tests/                     # Harness tests (21 passing)
+└── tests/                     # Harness tests (257 passing)
     └── test_harness.py
 ```
 
@@ -138,8 +140,20 @@ thesis-agents/
 - `pytest agent-bench/tasks/snake/tests/` — run public sanity tests for snake task
 - `bash eval/run_eval.sh snake` — run hidden evaluation (human/automation only)
 - `bash eval/run_eval.sh snake /path/to/temp/dir` — run eval against temp dir
-- `bench run --task snake --arch single_agent --provider anthropic` — run benchmark
-- `pytest tests/test_harness.py` — run all 21 harness infrastructure tests
+- `bench models` — list registered models (current lineup + legacy aliases)
+- `bench run --task snake --arch single_agent --model opus-5.5 --reasoning-effort low` — run benchmark (provider auto-detected from the registry)
+- `pytest` — run all harness tests (257 passing)
+
+## Models and reasoning effort
+- Registry: providers/models.py. Current lineup (fast/mid/flagship):
+  Anthropic `haiku-5.5`, `sonnet-5.5`, `opus-5.5`; OpenAI `gpt-6-luna`, `gpt-6.1-sol`, `gpt-6-astra`.
+- Legacy aliases (`haiku-4.5`, `sonnet-4.6`, `opus-4.6`, `gpt-5.6-*`) are frozen: existing run logs
+  reference them. Never edit or remove an entry; add new ones. tests/test_models.py enforces this.
+- Current-lineup models REQUIRE `--reasoning-effort` (experiments use `low`). Anthropic maps it to
+  adaptive thinking + `output_config.effort`; OpenAI to `reasoning_effort`. No temperature is sent on
+  this path (these models reject it). Legacy models run without it (`--thinking` is the legacy control).
+- Run logs record the requested effort, the effort/params actually sent per call (`sent_params`),
+  per-call and total estimated cost (providers/pricing.py, with source URL), and `git_dirty`.
 
 ## What to build next (priority order)
 1. ~~Repo structure~~ DONE
