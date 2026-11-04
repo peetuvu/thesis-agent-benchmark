@@ -247,6 +247,29 @@ def test_overlapping_hunks_raise():
         apply_diff(original, diff)
 
 
+def test_overlapping_hunks_with_consistent_content_raise():
+    """Hunks whose original ranges overlap must raise, even when every
+    context and removed line still matches the file after the first hunk.
+
+    Hunk 1 covers original lines 1-3; hunk 2 starts at original line 3.
+    A sequential applier without overlap detection would apply both silently.
+    """
+    original = "aaa\nbbb\nccc\nddd\neee\n"
+    diff = (
+        "@@ -1,3 +1,3 @@\n"
+        " aaa\n"
+        "-bbb\n"
+        "+BBB\n"
+        " ccc\n"
+        "@@ -3,2 +3,2 @@\n"
+        " ccc\n"
+        "-ddd\n"
+        "+DDD\n"
+    )
+    with pytest.raises(ValueError):
+        apply_diff(original, diff)
+
+
 # ---------------------------------------------------------------------------
 # 12. Context mismatch in middle raises even with fuzz=1
 # ---------------------------------------------------------------------------

@@ -30,8 +30,14 @@ Build a calculator that tokenizes, parses, and evaluates mathematical expression
 |------------|-----------|---------------|-------------|
 | 1 (lowest) | `+`, `-`  | Left          | Addition, subtraction |
 | 2          | `*`, `/`, `%` | Left      | Multiplication, division, modulo |
-| 3          | `**`      | Right         | Exponentiation |
-| 4 (highest)| unary `-` | Right         | Negation |
+| 3          | unary `-` | Right         | Negation |
+| 4 (highest)| `**`      | Right         | Exponentiation |
+
+Unary minus binds **looser** than `**` on its left: `-3 ** 2` = `-(3 ** 2)` = `-9`.
+
+The right operand of `**` may itself start with unary minus, so negative exponents must work:
+`2 ** -3` = `2 ** (-3)` = `0.125`, and `2 ** -1 ** 2` = `2 ** (-(1 ** 2))` = `0.5`.
+(This is the same rule Python uses.)
 
 Parentheses `(` `)` override precedence as usual.
 
@@ -133,6 +139,7 @@ Precedence climbing or recursive descent are both acceptable approaches. The par
 - Left-associative binary operators: `1 - 2 - 3` = `(1 - 2) - 3`
 - Right-associative exponentiation: `2 ** 3 ** 2` = `2 ** (3 ** 2)` = `2 ** 9` = `512`
 - Unary minus: `-3 ** 2` = `-(3 ** 2)` = `-9` (unary minus binds looser than exponentiation)
+- Negative exponent: `2 ** -3` = `2 ** (-3)` = `0.125` (unary minus is allowed as the right operand of `**`)
 - Parenthesized expressions: `(-3) ** 2` = `9`
 
 ---

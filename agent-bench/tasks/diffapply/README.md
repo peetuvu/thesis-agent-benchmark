@@ -142,6 +142,8 @@ When a diff contains multiple hunks, earlier hunks may change the total line cou
 
 Example: if hunk 1 adds 2 lines (orig_count=3, mod_count=5), subsequent hunks' positions shift by +2.
 
+**Overlapping hunks:** two hunks overlap if their original line ranges (`orig_start` to `orig_start + orig_count - 1`) share any line, including a line that is only context in one or both hunks. Overlapping hunks must raise `ValueError` even if every context and removed line would still match. For example, `@@ -4,3 +4,3 @@` (original lines 4–6) followed by `@@ -6,2 +6,2 @@` (original lines 6–7) overlap on line 6.
+
 ---
 
 ## Context line matching

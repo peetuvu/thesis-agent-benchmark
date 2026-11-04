@@ -1,10 +1,10 @@
 # Harness architecture
 
 A factual description of how the benchmark harness works, written from the code in the working
-tree on 2026-11-04. That is commit `1c0612b` plus the uncommitted fixes made the same day; see
-"Changes since `1c0612b`" at the end. Every claim cites the file and function it comes from.
+tree on 2026-11-04 at commit `69a792f`. The audit fixes (`97e7260`) and the timeout and
+batch-runner changes (`69a792f`) are listed in "Changes since `1c0612b`" at the end. Every claim cites the file and function it comes from.
 
-**Method.** I read the source code only. Statements were checked against the test suite (344
+**Method.** I read the source code only. Statements were checked against the test suite (349
 tests, all passing) and one local executor run. That run used a fake provider and the real
 hidden and public pytest runs. No paid API calls were made. Items marked **[UNVERIFIED]** come
 from reading the code but were not exercised.
@@ -47,7 +47,7 @@ scripts/aggregate_results.py       -> reads runs/*.json run logs and prints a su
 | Component | File / entry point | Role |
 |---|---|---|
 | CLI | `runner/cli.py:main`, `_build_parser`, `_load_architecture` | `bench run` / `bench models`. Resolves the model, loads the architecture, builds `RunConfig`, calls `Executor.run`, prints a summary. Installed as `bench` via `pyproject.toml [project.scripts]`. |
-| Batch runner | `scripts/run_batch.py:main`, `build_combinations`, `parse_output` | Builds the cartesian product task × model × arch × regime × reps and runs `bench run` **as a subprocess** for each, one after another. Reads `Status:` and `Hidden:` from stdout. Writes `runs/batch_<timestamp>.json`. Never imports harness code. It has no flag for `--max-output-tokens`, so batches use the default of 32000. |
+| Batch runner | `scripts/run_batch.py:main`, `build_combinations`, `parse_output` | Builds the cartesian product task × model × arch × regime × reps and runs `bench run` **as a subprocess** for each, one after another. Reads `Status:` and `Hidden:` from stdout. Writes `runs/batch_<timestamp>.json`. Never imports harness code. `--reasoning-effort`, `--max-output-tokens` and `--max-wall-clock` are forwarded to every run only when given; otherwise `bench`'s defaults apply (32000 and 1200 s). |
 | Config | `runner/config.py:RunConfig`, `TaskPaths` | Pydantic run config (generates `run_id` and the UTC `timestamp`). Budget fields: `max_tokens` (recorded only), `max_output_tokens` (per-call cap, default 32000, must be > 0), `max_tool_calls` (recorded only), `max_wall_clock_seconds`. `TaskPaths.allowed_edit_files` is every `*.py` under `agent-bench/tasks/<task>/<task>/` except `__init__.py`. |
 | Executor | `runner/executor.py:Executor.run` | Orchestrates one run (section 2). |
 | Call recorder | `runner/executor.py:_RecordingProvider` | Transparent `LLMProvider` wrapper. For every call it appends an `LLMCallRecord` to `calls` and a `CallTranscript` (system prompt, user prompt, response text) to `transcript`. That covers successful calls, `ProviderError`s, other exceptions, and calls cancelled by the timeout (`asyncio.CancelledError`). |
@@ -279,7 +279,7 @@ Still **not** recorded anywhere: thinking/reasoning text, the raw SDK response, 
 
 ### 5.4 Downstream consumers
 
-- `scripts/run_batch.py` writes `runs/batch_<YY-MM-DD_HHMMSS>.json` with the batch arguments and one outcome per run. It counts every non-`SUCCESS` run under `errors`.
+- `scripts/run_batch.py` writes `runs/batch_<YY-MM-DD_HHMMSS>.json` with the batch arguments (including `provider`, `reasoning_effort`, `max_output_tokens` and `max_wall_clock`; `null` means `bench`'s default was used) and one outcome per run. It counts every non-`SUCCESS` run under `errors`.
 - `scripts/aggregate_results.py`:
   - `load_runs` reads every `runs/*.json` except `*.artifacts.json` and `batch_*.json`. Any other file without a run log's required keys is reported on stderr as skipped. **No run is dropped because of its status.**
   - `group_key` groups by (task, provider, model API string, architecture, regime, requested reasoning effort); `-` stands for a missing value in older logs.
@@ -303,5 +303,8 @@ Still **not** recorded anywhere: thinking/reasoning text, the raw SDK response, 
 | 8 | Any policy violation sets status `policy_violation` | `executor.py:_derive_outcome`; `base.py:RunStatus` |
 | 9 | Editable files shown to the model = `allowed_edit_files` | `executor.py:_build_context`; `utils.py:resolve_editable_files` |
 | 10 | Aggregation by six dimensions, with counts, strict pass@1 and cost; nothing dropped | `scripts/aggregate_results.py` |
+| 11 | Default run wall clock raised from 300 s to 1200 s (`DEFAULT_MAX_WALL_CLOCK_SECONDS`, also the `TaskContext.timeout_seconds` default) | `runner/config.py`, `runner/cli.py`, `architectures/base.py` |
+| 12 | Per-request SDK timeout raised from 300 s to 600 s, shared by both providers (`REQUEST_TIMEOUT_SECONDS`) | `providers/base.py`, `providers/anthropic.py`, `providers/openai.py` |
+| 13 | Batch runner forwards `--max-output-tokens` and `--max-wall-clock` and records them in the batch summary | `scripts/run_batch.py` |
 
-Tests: `tests/test_review_fixes.py` (one class per change), plus updates in `tests/test_providers.py`, `tests/test_sequential.py` and `tests/test_harness.py`.
+Changes 1–10 are commit `97e7260`; 11–13 are commit `69a792f`. Tests: `tests/test_review_fixes.py` (one class per change 1–10), `tests/test_providers.py` (shared request timeout) and `tests/test_run_batch.py` (flag forwarding), plus updates in `tests/test_sequential.py` and `tests/test_harness.py`.

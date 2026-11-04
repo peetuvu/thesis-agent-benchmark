@@ -76,7 +76,7 @@ URL validation rules (implement manually, no libraries):
 - Domain must not start or end with `.` or `-`
 - Domain segments (split by `.`) must each be 1-63 characters
 - Domain characters: alphanumeric and hyphens only
-- Port numbers after `:` are allowed (e.g., `http://localhost:8080/path`)
+- Port numbers after `:` are allowed (e.g., `http://example.com:8080/path`). The port is not part of the domain, and the dot rule still applies, so `http://localhost:8080/path` is invalid.
 - Path, query, fragment after the domain are allowed but not validated in detail
 - Empty string → False
 - Whitespace in the URL → False
