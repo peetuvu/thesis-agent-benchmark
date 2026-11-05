@@ -27,6 +27,7 @@ runs/*.md
 runs/*.json
 !runs/.gitkeep
 runs_smoke/
+runs_pilot/
 
 # Secrets
 .env

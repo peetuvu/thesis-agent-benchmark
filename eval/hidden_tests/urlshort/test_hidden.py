@@ -26,7 +26,7 @@ def test_url_domain_starts_with_hyphen():
 
 
 def test_url_domain_ends_with_hyphen():
-    """Domain ending with a hyphen should be rejected."""
+    """A domain segment ending with a hyphen should be rejected."""
     assert is_valid_url("http://example-.com") is False
 
 
@@ -143,7 +143,8 @@ def test_stats_after_expiration():
     code = result["short_code"]
     # Resolve once before expiration
     svc.resolve(code, current_time=1050.0)
-    # Now expired — get_stats should still work
+    # get_stats has no current_time, so is_expired uses the real clock
+    # (time.time() is far past expires_at=1100.0). Stats must still be returned.
     stats = svc.get_stats(code)
     assert stats["is_expired"] is True
     assert stats["clicks"] == 1

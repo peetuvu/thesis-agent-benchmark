@@ -176,7 +176,7 @@ Evaluation rules:
 - Division by zero → raise `ValueError` with a message containing "division by zero"
 - Modulo by zero → raise `ValueError` with a message containing "division by zero"
 - Undefined variable → raise `ValueError` with a message containing the variable name
-- Empty expression → raise `ValueError`
+- Empty or whitespace-only expression (e.g. `""` or `"   "`) → raise `ValueError`
 
 ---
 

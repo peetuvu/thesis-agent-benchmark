@@ -56,8 +56,8 @@ class RateLimiter:
 
         If current_time is None, use time.time().
         Returns True if the request is within limits, False if rate limited.
-        Each call to is_allowed (even if denied) does NOT count as a request.
-        Only calls that return True count toward the limit.
+        is_allowed only checks; it never counts as a request, whether it
+        returns True or False. Only record() counts toward the limit.
         """
         ...
 
@@ -75,6 +75,7 @@ URL validation rules (implement manually, no libraries):
 - Domain must contain at least one `.`
 - Domain must not start or end with `.` or `-`
 - Domain segments (split by `.`) must each be 1-63 characters
+- Each domain segment must not start or end with `-` (so `http://example-.com` is invalid)
 - Domain characters: alphanumeric and hyphens only
 - Port numbers after `:` are allowed (e.g., `http://example.com:8080/path`). The port is not part of the domain, and the dot rule still applies, so `http://localhost:8080/path` is invalid.
 - Path, query, fragment after the domain are allowed but not validated in detail
@@ -117,6 +118,9 @@ class URLShortener:
         current_time: float | None = None,
     ) -> dict:
         """Create a shortened URL.
+
+        Every call creates a new entry with a new short code, even if the same
+        URL has already been shortened (no deduplication).
 
         Args:
             url: The long URL to shorten.
@@ -171,7 +175,8 @@ class URLShortener:
                 "created_at": float
                 "expires_at": float
                 "clicks": int
-                "is_expired": bool (check against current time)
+                "is_expired": bool — checked against the real clock
+                    (time.time()), since get_stats takes no current_time
 
         Raises:
             KeyError: If the code does not exist.
@@ -201,12 +206,13 @@ Short code generation rules:
 - Left-padded with zeros to `code_length`
 - Custom codes must be purely alphanumeric (a-z, A-Z, 0-9). Reject others with ValueError.
 - Custom codes are case-sensitive: `"MyCode"` and `"mycode"` are different codes.
+- Every `shorten()` call creates a new code, even for a URL that is already stored (no deduplication).
 - If a generated code collides with an existing code (custom or generated), skip it and try the next counter value.
 
 Expiration rules:
 - Each link has a `created_at` and `expires_at` timestamp
 - `resolve()` checks expiration: if `current_time >= expires_at`, raise ValueError
-- `get_stats()` reports `is_expired` based on current time but does NOT prevent access to stats
+- `get_stats()` reports `is_expired` by comparing `time.time()` (the real clock) with `expires_at`, but does NOT prevent access to stats
 - Expired links remain in storage (they are not garbage collected)
 
 Rate limiting:

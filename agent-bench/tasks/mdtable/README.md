@@ -64,7 +64,7 @@ All tables must be reformatted to this standard:
 - Column widths set to the widest cell in that column (including header)
 - Separator row uses dashes filling the full column width
 - Alignment markers preserved if present (`:---`, `:---:`, `---:`)
-- A single blank line before and after each table (unless at document start/end)
+- A blank line is ensured before and after each table (unless at document start/end); existing blank lines, including several in a row, are kept as they are
 
 Example output:
 
@@ -141,8 +141,10 @@ def format_markdown(text: str) -> str:
         - Tables inside indented code blocks (4+ spaces or 1+ tab at line start)
           must NOT be reformatted.
         - Consecutive blank lines between non-table content are preserved as-is.
-        - A single blank line is ensured before and after each reformatted table,
+        - A blank line is ensured before and after each reformatted table,
           unless the table is at the very start or end of the document.
+          Existing blank lines around a table, including several in a row,
+          are kept as they are.
     """
     ...
 ```
