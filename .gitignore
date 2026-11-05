@@ -26,10 +26,9 @@ Thumbs.db
 runs/*.md
 runs/*.json
 !runs/.gitkeep
+runs_smoke/
 
 # Secrets
 .env
 *.key
-CLAUDE.MDruns_smoke/
-runs/
-runs_smoke/
+CLAUDE.md
