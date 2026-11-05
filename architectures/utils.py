@@ -9,13 +9,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from architectures.base import TaskContext
 
-# Matches labeled code blocks: ```path/to/file.ext\n<content>\n```
-# The label must contain a dot to distinguish from language identifiers
-# (e.g. "python", "javascript" won't match but "game.py" will).
-_CODE_BLOCK_RE = re.compile(
-    r"```([\w][\w/.-]*\.[\w]+)\s*\n(.*?)```",
-    re.DOTALL,
-)
+# Opening fence of a labeled code block: ```path/to/file.ext followed by a
+# newline. The label must contain a dot to distinguish from language
+# identifiers (e.g. "python", "javascript" won't match but "game.py" will).
+# group(1) is the backtick run, so the closing fence can be matched against
+# its length.
+_OPEN_FENCE_RE = re.compile(r"(?<!`)(`{3,})([\w][\w/.-]*\.[\w]+)\s*\n")
 
 # Command the templates show as the public sanity test command.
 TEST_CMD = "python -m pytest tests/ -v"
@@ -39,14 +38,29 @@ def parse_code_blocks(text: str) -> dict[str, str]:
         <content>
         ```
 
+    The block ends at the first closing fence: a line consisting only of
+    backticks, at least as many as the opening fence, plus optional
+    whitespace. A ``` in the middle of a line (e.g. ``s.startswith("```")``)
+    or a line starting with ``` followed by other characters (e.g. ```python)
+    never closes a block. A block without a closing fence is ignored. The
+    content runs up to the start of the closing fence's line, so it ends with
+    a newline unless it is empty. A later block for the same path wins.
+
     Returns:
         Dict mapping file paths to their content.
     """
     result: dict[str, str] = {}
-    for match in _CODE_BLOCK_RE.finditer(text):
-        filepath = match.group(1)
-        content = match.group(2)
-        result[filepath] = content
+    pos = 0
+    while (opening := _OPEN_FENCE_RE.search(text, pos)) is not None:
+        n = len(opening.group(1))
+        closing = re.compile(rf"^[ \t]*`{{{n},}}[ \t\r]*$", re.MULTILINE).search(
+            text, opening.end(),
+        )
+        if closing is None:
+            pos = opening.end()
+            continue
+        result[opening.group(2)] = text[opening.end():closing.start()]
+        pos = closing.end()
     return result
 
 

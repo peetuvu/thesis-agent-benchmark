@@ -1,0 +1,2 @@
+run_id,log_file,task,provider,model,effort,architecture,regime,outcome,files_changed,old_status,new_status,old_hidden_passed,old_hidden_total,new_hidden_passed,new_hidden_total,old_policy_compliant,new_policy_compliant,new_stop_reason,old_hidden_failing,new_hidden_failing,note
+bcb91671-c80f-4774-bc1f-6b0381837cc9,26-03-26_1557_anthropic_sonnet-4-6_single_agent_snake_minimal_bcb91671.json,snake,anthropic,claude-sonnet-4-6,,single_agent,minimal,no_artifacts,,success,success,0,0,0,0,False,False,,,,

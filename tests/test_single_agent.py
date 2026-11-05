@@ -82,6 +82,60 @@ class TestParseCodeBlocks:
         result = parse_code_blocks(text)
         assert "snake/game.py" in result
 
+    # --- closing fence must be a line of only backticks (+ whitespace) ---
+
+    def test_mid_line_backticks_do_not_close(self) -> None:
+        code = "x = 1  # see ``` here\ny = 2\n"
+        result = parse_code_blocks(f"```a/b.py\n{code}```\n")
+        assert result == {"a/b.py": code}
+
+    def test_backticks_in_string_literal_do_not_close(self) -> None:
+        code = (
+            "def is_fence(s):\n"
+            '    return s.startswith("```") or s.startswith("~~~")\n'
+            "\n"
+            "FENCE = '```'\n"
+        )
+        result = parse_code_blocks(f"Code:\n\n```mdtable/formatter.py\n{code}```\n\nDone.")
+        assert result == {"mdtable/formatter.py": code}
+
+    def test_line_starting_with_fence_and_language_does_not_close(self) -> None:
+        code = 'DOC = """\n```python\nprint(1)\n"""\nz = 3\n'
+        result = parse_code_blocks(f"```a/doc.py\n{code}```\n")
+        assert result == {"a/doc.py": code}
+
+    def test_nested_fences_inside_longer_outer_fence(self) -> None:
+        code = 'S = """\n```python\nprint(1)\n```\n"""\n'
+        result = parse_code_blocks(f"````a/nest.py\n{code}````\n")
+        assert result == {"a/nest.py": code}
+
+    def test_shorter_fence_does_not_close_longer_one(self) -> None:
+        result = parse_code_blocks("````a.py\nx\n```\ny\n`````\n")
+        assert result == {"a.py": "x\n```\ny\n"}
+
+    def test_bare_fence_line_closes_three_backtick_block(self) -> None:
+        # An inner bare ``` line closes a 3-backtick block (as in CommonMark).
+        text = "```a.py\nx\n```python\ny\n```\nz\n```\n"
+        assert parse_code_blocks(text) == {"a.py": "x\n```python\ny\n"}
+
+    def test_closing_fence_with_surrounding_whitespace(self) -> None:
+        text = "```a.py\nx\n  ```  \n```b.py\ny\n```\t\r\n"
+        assert parse_code_blocks(text) == {"a.py": "x\n", "b.py": "y\n"}
+
+    def test_closing_fence_at_end_of_text(self) -> None:
+        assert parse_code_blocks("```a.py\nx\n```") == {"a.py": "x\n"}
+
+    def test_unclosed_block_ignored(self) -> None:
+        text = '```a.py\nif s.startswith("```"):\n    pass\n'
+        assert parse_code_blocks(text) == {}
+
+    def test_blocks_after_a_block_with_inline_fence(self) -> None:
+        text = (
+            '```a.py\nF = "```"\n```\n\nThen:\n\n'
+            "```b.py\nG = 1\n```\n"
+        )
+        assert parse_code_blocks(text) == {"a.py": 'F = "```"\n', "b.py": "G = 1\n"}
+
 
 # ---------------------------------------------------------------------------
 # format_source_files

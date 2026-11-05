@@ -24,6 +24,14 @@ the executor applied) are re-scored the same way; final_rescore_matches_log
 is False when today's hidden tests or task files score them differently than
 the log recorded, which would make implement-vs-final comparisons unsound.
 
+The implement step is always parsed with the current parse_code_blocks
+(fixed on 2026-11-05 to close blocks only at a line of backticks). Final
+results come from the run log, which used the parser of the time; pass
+--rescored to replace them, for runs whose result changed, with
+analysis/rescore_<task>.csv (scripts/rescore_runs.py), and to take the final
+files from the responses re-parsed with the fixed parser. The header says
+whether re-scored results are in use and how many runs were affected.
+
 "Pass" everywhere means every hidden test passed (hidden_total > 0 and
 hidden_passed == hidden_total). This is computed from test counts only, so it
 ignores run status and policy compliance (unlike aggregate_results.py's strict
@@ -247,8 +255,13 @@ def _pf(p: bool | None) -> str:
 
 def analyze_run(
     log_path: Path, log: dict[str, Any], scorer: Scorer, rescore_final: bool = True,
+    final_files_override: dict[str, str] | None = None,
 ) -> StageRow:
-    """Build the StageRow for one sequential run log."""
+    """Build the StageRow for one sequential run log.
+
+    final_files_override replaces artifacts.modified_files as the final code
+    (used with --rescored for runs whose files changed under the fixed parser).
+    """
     tr = log["test_results"]
     row = StageRow(
         run_id=log["run_id"],
@@ -297,7 +310,8 @@ def analyze_run(
     if not implement_files:
         row.note = "implement step produced no labeled code blocks"
 
-    final_files = artifacts.get("modified_files") or {}
+    final_files = (final_files_override if final_files_override is not None
+                   else artifacts.get("modified_files") or {})
     row.fix_changed_code = final_files != implement_files
     if rescore_final:
         fp, ft, _ = scorer(row.task, final_files)
@@ -442,6 +456,20 @@ def print_failing(
 # ---------------------------------------------------------------------------
 
 
+def _rebuilt_final(log_path: Path, log: dict[str, Any]) -> dict[str, str] | None:
+    """Final files re-parsed with the current parser (see rescore_runs.py)."""
+    from rescore_runs import rebuild_final_files
+    art_name = log.get("artifacts_file")
+    if not art_name or not (log_path.parent / art_name).is_file():
+        return None
+    try:
+        artifacts = json.loads((log_path.parent / art_name).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    files, _ = rebuild_final_files(log["architecture_name"], artifacts)
+    return files
+
+
 def _check_output_path(path: Path, repo_root: Path) -> None:
     """Refuse to write inside eval/ or runs/."""
     resolved = path.resolve()
@@ -458,6 +486,9 @@ def main(argv: list[str] | None = None, scorer: Scorer | None = None) -> int:
                     help="output CSV (default: ./stage_analysis_<task>.csv)")
     ap.add_argument("--no-rescore-final", action="store_true",
                     help="skip the drift check (re-scoring final files)")
+    ap.add_argument("--rescored", action="store_true",
+                    help="use re-scored results from analysis/rescore_<task>.csv")
+    ap.add_argument("--analysis-dir", type=Path, default=None, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
 
     csv_path = args.csv or Path(f"stage_analysis_{args.task}.csv")
@@ -467,6 +498,12 @@ def main(argv: list[str] | None = None, scorer: Scorer | None = None) -> int:
     if not logs:
         print(f"no run logs for task {args.task!r} in {args.runs_dir}", file=sys.stderr)
         return 1
+    rescore = None
+    if args.rescored:
+        from rescored import ANALYSIS_DIR, require_rescore
+        rescore = require_rescore([args.task], args.analysis_dir or ANALYSIS_DIR)
+        header = rescore.header([l for _, l in logs])
+        logs = [(p, rescore.apply(l)) for p, l in logs]
     seq_logs = [(p, l) for p, l in logs if l["architecture_name"] == SEQUENTIAL]
     single_logs = [l for _, l in logs if l["architecture_name"] == SINGLE_AGENT]
 
@@ -474,7 +511,9 @@ def main(argv: list[str] | None = None, scorer: Scorer | None = None) -> int:
     rows: list[StageRow] = []
     for i, (path, log) in enumerate(seq_logs, 1):
         print(f"[{i}/{len(seq_logs)}] scoring {path.name}", file=sys.stderr)
-        rows.append(analyze_run(path, log, score, rescore_final=not args.no_rescore_final))
+        override = _rebuilt_final(path, log) if rescore and rescore.changed(log["run_id"]) else None
+        rows.append(analyze_run(path, log, score, rescore_final=not args.no_rescore_final,
+                                final_files_override=override))
 
     fieldnames = list(rows[0].csv_dict()) if rows else list(StageRow.__dataclass_fields__)
     with csv_path.open("w", newline="") as f:
@@ -483,6 +522,8 @@ def main(argv: list[str] | None = None, scorer: Scorer | None = None) -> int:
         for r in rows:
             w.writerow(r.csv_dict())
 
+    print(header if rescore else "Results as logged (no --rescored); implement step parsed "
+          "with the current parser")
     print(f"\nTask {args.task}: {len(seq_logs)} sequential, {len(single_logs)} single-agent runs\n")
     if rows:
         print_summary(summarize(rows, single_logs))

@@ -23,6 +23,11 @@ effort). Every run log is counted; nothing is dropped:
   cost         mean estimated USD over priced runs; "-" if none is priced,
                "*" suffix if only some are
 
+--rescored: use analysis/rescore_<task>.csv (written by
+scripts/rescore_runs.py) for runs whose result changed under the fixed
+code-block parser: their status and hidden-test results are replaced by the
+re-scored values. The header says so and how many runs were affected.
+
 Files in runs/ that are not run logs (batch_*.json summaries, *.artifacts.json
 sidecars) are skipped by name; any other JSON without a run log's fields is
 reported as skipped.
@@ -37,6 +42,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rescored import ANALYSIS_DIR, require_rescore  # noqa: E402  (stdlib only)
 
 RUNS_DIR = Path("runs")
 _REQUIRED_KEYS = ("run_id", "task_name", "model", "architecture_name", "status", "test_results")
@@ -175,6 +183,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("task", nargs="?", default=None, help="Only this task")
     parser.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
     parser.add_argument("--csv", type=Path, default=None, help="Also write the rows as CSV")
+    parser.add_argument("--rescored", action="store_true",
+                        help="use re-scored results from analysis/rescore_<task>.csv")
+    parser.add_argument("--analysis-dir", type=Path, default=ANALYSIS_DIR,
+                        help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     runs, skipped = load_runs(args.runs_dir, args.task)
@@ -183,6 +195,11 @@ def main(argv: list[str] | None = None) -> int:
     if not runs:
         print("No runs found" + (f" for task={args.task}" if args.task else ""))
         return 1
+
+    if args.rescored:
+        rescore = require_rescore({r["task_name"] for r in runs}, args.analysis_dir)
+        print(rescore.header(runs))
+        runs = [rescore.apply(r) for r in runs]
 
     rows = summarize(runs)
     totals = {k: sum(r[k] for r in rows) for k in ("errors", "timeouts", "non_compliant")}
