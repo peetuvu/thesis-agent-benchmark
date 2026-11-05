@@ -30,4 +30,5 @@ runs/*.json
 # Secrets
 .env
 *.key
-CLAUDE.MD
+CLAUDE.MDruns_smoke/
+runs/
