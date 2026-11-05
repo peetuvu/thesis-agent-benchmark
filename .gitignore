@@ -32,3 +32,4 @@ runs/*.json
 *.key
 CLAUDE.MDruns_smoke/
 runs/
+runs_smoke/
