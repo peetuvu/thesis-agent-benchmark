@@ -4,21 +4,19 @@ This harness benchmarks LLM architectures on small Python coding tasks for Peetu
 
 ## Quickstart
 
+Install Python 3.11+ and [uv](https://docs.astral.sh/uv/) first.
+
 ```bash
-git clone git@github.com:peetuvu/thesis-agent-benchmark.git  # untested
+git clone https://github.com/peetuvu/thesis-agent-benchmark.git  # untested
 cd thesis-agent-benchmark
 uv sync --locked
 source .venv/bin/activate
 cp .env.example .env
-sed -i 's/^ANTHROPIC_API_KEY=/&PASTE_KEY_HERE/' .env
+# open .env and paste your ANTHROPIC and OPENAI keys
 python scripts/check_env.py
 pytest
 bench run --task snake --arch single_agent --model haiku-5.5 --reasoning-effort low  # untested
 ```
-
-Install Python 3.11+ and [uv](https://docs.astral.sh/uv/) first.
-
-Replace `PASTE_KEY_HERE` with your Anthropic key before running that line.
 
 Expect `Status: success`, `Hidden: 8/8 passed` and `Public: 5/5 passed` from the last command.
 

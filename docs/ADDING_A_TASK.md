@@ -27,7 +27,7 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]  # thesis-agents/
+ROOT = Path(__file__).resolve().parents[3]  # repo root
 
 AGENT_BENCH = Path(
     os.environ.get("BENCH_SOURCE_DIR", str(ROOT / "agent-bench" / "tasks" / "mytask"))

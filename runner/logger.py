@@ -97,7 +97,7 @@ class SamplingConfig(BaseModel):
 
 
 class RunLog(BaseModel):
-    """Complete record of a single benchmark run (STAGES.md D1 schema)."""
+    """Complete record of a single benchmark run."""
 
     run_id: str
     timestamp: datetime

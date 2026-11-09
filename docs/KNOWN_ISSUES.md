@@ -19,7 +19,7 @@
 ## Reading the results
 
 - Use `--rescored` for reported numbers: the old code-block parser changed 26 of 120 mdtable results, 2 of them from failure to success.
-- Diffapply never specifies the trailing newline for an empty original, and that test alone failed 16 of its 120 runs (`gpt-6-luna` 10, `sonnet-5.5` 6).
+- Diffapply never specifies the trailing newline for an empty original, and `test_empty_original_with_additions` was the only failing test in 16 of the 120 runs (`gpt-6-luna` 10, `sonnet-5.5` 6).
 - URL shortener hidden tests skip expired `resolve`, unknown codes, duplicate custom codes, rate limiting through `shorten`, and code exhaustion, so pass@1 overstates spec compliance.
 - `max_tokens` and `max_tool_calls` are recorded but not enforced.
 - The sequential pipeline gets the per-call output cap on each of its four calls, so its total budget is larger than single agent's.

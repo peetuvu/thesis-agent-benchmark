@@ -12,18 +12,17 @@ python scripts/run_batch.py $MATRIX --dry-run
 Run every batch from a git tag in detached HEAD, and commit analysis on `main`.
 
 ```bash
-git status --short
-git tag experiment-v2
-git checkout experiment-v2
-nohup python scripts/run_batch.py $MATRIX > ../batch-experiment-v2.log 2>&1 &  # untested
-git switch main
+MATRIX="--tasks calculator diffapply mdtable urlshort --models haiku-5.5 sonnet-5.5 opus-5.5 gpt-6-luna gpt-6.1-sol gpt-6-astra --archs single_agent sequential --regimes minimal production --reps 5 --reasoning-effort low"
+test -z "$(git status --short)" && git tag experiment-v2 && git checkout experiment-v2 && nohup python scripts/run_batch.py $MATRIX > ../batch-experiment-v2.log 2>&1 &  # untested
 ```
-
-Confirm `git status --short` prints nothing before tagging.
 
 Keep the log outside the repository, because any untracked file marks later runs as dirty.
 
-Wait for the batch to finish before `git switch main`.
+### When the batch has finished
+
+```bash
+git switch main
+```
 
 ## Analysis
 
@@ -47,8 +46,7 @@ git add analysis && git commit -m "Add experiment-v2 analysis"
    ```
 3. Move the failed runs out of `runs/`, because analysis counts them.
    ```bash
-   mkdir -p ../runs_failed
-   grep -lE '^  "status": "(error|timeout)"' runs/2*.json | sed 's/\.json$//' | while read -r s; do mv "$s".* ../runs_failed/; done
+   mkdir -p ../runs_failed && grep -lE '^  "status": "(error|timeout)"' runs/2*.json | sed 's/\.json$//' | while read -r s; do mv "$s".* ../runs_failed/; done
    ```
 4. Rerun only the missing combinations from the same tag, using the flags to narrow the batch.
    ```bash
