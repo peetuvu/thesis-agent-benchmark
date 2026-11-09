@@ -36,3 +36,14 @@ CLAUDE.md
 thesis_style_check.py
 report.md
 sections
+# Local development files
+STAGES.md
+*.log
+diffapply_repl_log.txt
+.claude/
+docs/notes/
+docs/harness_architecture.md
+agent-bench/prompts/prompting_patterns_summary.md
+scripts/inspect_runs.py
+eval/passk.py
+eval/test_passk.py

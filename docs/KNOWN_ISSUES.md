@@ -15,7 +15,6 @@
 - Nothing in the code enforces the tag rule.
 - Hidden-test results count only `PASSED` and `FAILED` lines, so a fixture `ERROR` lowers the total silently.
 - `classify_failures.py` covers mdtable only and needs the `## 4.` heading in `docs/task_summary.md`.
-- `CLAUDE.md` and `STAGES.md` are out of date on project status.
 
 ## Reading the results
 
