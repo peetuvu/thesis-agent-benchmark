@@ -6,7 +6,7 @@ imports. Prints a clear pass/fail per check and a summary of usable providers.
 
 Usage: python3 scripts/check_env.py
 
-Exit code 0 if at least ANTHROPIC_API_KEY is set and the bench CLI is
+Exit code 0 if at least one provider API key is set and the bench CLI is
 available; exit code 1 otherwise. API key values are never printed in full.
 """
 import importlib
@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MIN_PYTHON = (3, 11)
+PROVIDER_KEYS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
 
 
 def ok(msg: str) -> None:
@@ -59,16 +60,13 @@ def check_bench_cli() -> bool:
     return False
 
 
-def check_api_key(name: str, provider: str, required: bool) -> bool:
+def check_api_key(name: str, provider: str) -> bool:
     """Check an API key env var. Returns True if the provider is usable."""
     value = os.environ.get(name)
     if value:
         ok(f"{name} set ({mask_key(value)})")
         return True
-    if required:
-        fail(f"{name} not set — {provider} provider unavailable")
-    else:
-        warn(f"{name} not set — {provider} provider unavailable")
+    warn(f"{name} not set — {provider} provider unavailable")
     return False
 
 
@@ -96,21 +94,11 @@ def main() -> int:
     python_ok = check_python()
     bench_ok = check_bench_cli()
 
-    anthropic_key = check_api_key("ANTHROPIC_API_KEY", "anthropic", required=True)
-    openai_key = check_api_key("OPENAI_API_KEY", "openai", required=False)
-    google_key = check_api_key("GOOGLE_API_KEY", "google", required=False)
+    providers = [p for p, key in PROVIDER_KEYS.items() if check_api_key(key, p)]
 
-    check_import("anthropic", required=True)
+    check_import("anthropic", required=False)
     check_import("openai", required=False)
     check_import("pydantic", required=True)
-
-    providers = []
-    if anthropic_key:
-        providers.append("anthropic")
-    if openai_key:
-        providers.append("openai")
-    if google_key:
-        providers.append("google")
 
     print()
     if providers:
@@ -118,7 +106,7 @@ def main() -> int:
     else:
         print("Environment NOT ready — no provider API keys set")
 
-    if python_ok and bench_ok and anthropic_key:
+    if python_ok and bench_ok and providers:
         return 0
     return 1
 

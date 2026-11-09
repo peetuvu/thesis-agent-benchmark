@@ -33,3 +33,6 @@ runs_pilot/
 .env
 *.key
 CLAUDE.md
+thesis_style_check.py
+report.md
+sections

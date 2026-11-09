@@ -285,9 +285,11 @@ class TestFix4OutputCap:
     def test_cli_flag(self) -> None:
         from runner.cli import _build_parser
         args = _build_parser().parse_args(
-            ["run", "--task", "snake", "--arch", "single_agent", "--max-output-tokens", "777"])
+            ["run", "--task", "snake", "--arch", "single_agent", "--model", "opus-5.5",
+             "--max-output-tokens", "777"])
         assert args.max_output_tokens == 777
-        default = _build_parser().parse_args(["run", "--task", "snake", "--arch", "single_agent"])
+        default = _build_parser().parse_args(
+            ["run", "--task", "snake", "--arch", "single_agent", "--model", "opus-5.5"])
         assert default.max_output_tokens == 32_000
 
     def test_single_agent_uses_cap_not_total_budget(self) -> None:

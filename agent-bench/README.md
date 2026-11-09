@@ -28,5 +28,5 @@ From within a task directory:
 
 ```bash
 cd agent-bench/tasks/snake
-pytest tests/
+python -m pytest tests/
 ```

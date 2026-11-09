@@ -73,7 +73,7 @@ thesis-agents/
 ├── runs/                      # RUN LOGS — structured JSON + markdown per run
 │   └── .gitkeep
 │
-└── tests/                     # Harness tests (349 passing)
+└── tests/                     # Harness tests (423 passing)
     └── test_harness.py
 ```
 
@@ -137,12 +137,12 @@ thesis-agents/
 - **Temp-dir isolation**: eliminates cross-run contamination, no git-reset needed
 
 ## Commands
-- `pytest agent-bench/tasks/snake/tests/` — run public sanity tests for snake task
+- `cd agent-bench/tasks/snake && python -m pytest tests/` — run public sanity tests for snake task
 - `bash eval/run_eval.sh snake` — run hidden evaluation (human/automation only)
 - `bash eval/run_eval.sh snake /path/to/temp/dir` — run eval against temp dir
 - `bench models` — list registered models (current lineup + legacy aliases)
 - `bench run --task snake --arch single_agent --model opus-5.5 --reasoning-effort low` — run benchmark (provider auto-detected from the registry)
-- `pytest` — run all harness tests (349 passing)
+- `pytest` — run all harness tests (423 passing)
 
 ## Models and reasoning effort
 - Registry: providers/models.py. Current lineup (fast/mid/flagship):

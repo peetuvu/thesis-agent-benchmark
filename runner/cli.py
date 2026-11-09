@@ -11,7 +11,7 @@ from inspect import isclass
 from architectures.base import Architecture
 from pydantic import ValidationError
 
-from providers.models import REASONING_EFFORTS, list_models, resolve_model
+from providers.models import REASONING_EFFORTS, get_model, list_models, resolve_model
 from runner.config import DEFAULT_MAX_WALL_CLOCK_SECONDS, RunConfig
 from runner.executor import Executor
 
@@ -57,7 +57,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser = sub.add_parser("run", help="Execute a benchmark run")
     run_parser.add_argument("--task", required=True, help="Task name (e.g. snake)")
     run_parser.add_argument("--arch", required=True, help="Architecture module name (e.g. single_agent)")
-    run_parser.add_argument("--model", default="sonnet-4.6", help="Model alias or raw API string (default: sonnet-4.6)")
+    run_parser.add_argument("--model", required=True, help="Model alias (see `bench models`)")
     run_parser.add_argument("--provider", default=None, help="API provider (auto-detected from model registry if omitted)")
     run_parser.add_argument("--prompt-regime", default="minimal", help="Prompt regime (minimal|production)")
     run_parser.add_argument("--max-tokens", type=int, default=100_000, help="Total token budget (recorded only, not enforced)")
@@ -92,11 +92,18 @@ def main() -> None:
         sys.exit(0)
 
     if args.command == "run":
+        # Reject unknown aliases here, before anything is loaded or any API call is made.
+        try:
+            get_model(args.model)
+        except KeyError as e:
+            print(f"Error: {e.args[0]}", file=sys.stderr)
+            sys.exit(2)
+
         # Resolve model alias -> (api_string, auto_provider)
         api_string, auto_provider = resolve_model(args.model)
 
-        # Provider: explicit flag > auto-detected from registry > fallback to anthropic
-        provider = args.provider or auto_provider or "anthropic"
+        # Provider: explicit flag > auto-detected from registry
+        provider = args.provider or auto_provider
 
         architecture = _load_architecture(args.arch)
 
